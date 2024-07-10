@@ -2,7 +2,7 @@
 __pycache__/
 *.py[cod]
 *$py.class
-
+ungit/*
 # C extensions
 *.so
 
@@ -106,10 +106,8 @@ ipython_config.py
 #pdm.lock
 #   pdm stores project-wide configurations in .pdm.toml, but it is recommended to not include it
 #   in version control.
-#   https://pdm.fming.dev/latest/usage/project/#working-with-version-control
+#   https://pdm.fming.dev/#use-with-ide
 .pdm.toml
-.pdm-python
-.pdm-build/
 
 # PEP 582; used by e.g. github.com/David-OConnor/pyflow and github.com/pdm-project/pdm
 __pypackages__/
@@ -160,3 +158,42 @@ cython_debug/
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
+/flagged/
+
+data/CASIA_CHINESE/test/*.mdb
+data/CASIA_CHINESE/test_style_samples/*.pkl
+data/CASIA_CHINESE/train/*.mdb
+data/CASIA_CHINESE/train_style_samples/*.pkl
+data/CASIA_CHINESE/*.pkl
+
+data/CASIA_ENGLISH/test/*.mdb
+data/CASIA_ENGLISH/test_style_samples/*.pkl
+data/CASIA_ENGLISH/train/*.mdb
+data/CASIA_ENGLISH/train_style_samples/*.pkl
+data/CASIA_ENGLISH/*.pkl
+
+data/CASIA_JAPANESE/test/*.mdb
+data/CASIA_JAPANESE/test_style_samples/*.pkl
+data/CASIA_JAPANESE/train/*.mdb
+data/CASIA_JAPANESE/train_style_samples/*.pkl
+data/CASIA_JAPANESE/*.pkl
+
+saved/models/*.pth
+saved/samples/*.pth
+saved/tborad/*.pth
+model_zoo/*.pth
+auto_*
+Generated/Chinese/*.pth
+Generated/Japanese/*.pth
+Generated/English/*.pth
+style_samples/*g*
+checkpoint_path/*.pth
+font/*g*
+font/result/*
+font/result2/*
+font/result3/*
+
+z_new_start/ABtest/files/AB_coors/*.pkl
+z_new_start/ABtest/files/AB_pics_pkl/*.pkl
+z_new_start/ABtest/files/*.pkl
+
