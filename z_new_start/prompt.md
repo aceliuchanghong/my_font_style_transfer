@@ -2067,16 +2067,754 @@ hs = self.glyph_transformer_decoder(tgt, glyph_style, tgt_mask=tgt_mask)
 hs的形状是?怎么变化的
 
 ---
+
+```python
+class FontModel(nn.Module):
+    def __init__(self,
+                 d_model=512,
+                 num_head=8,
+                 num_encoder_layers=2,
+                 num_glyph_encoder_layers=1,
+                 num_gly_decoder_layers=2,
+                 dim_feedforward=2048,  # 前馈神经网络中隐藏层的大小
+                 dropout=0.2,
+                 activation="relu",
+                 normalize_before=True,  # 应用多头注意力和前馈神经网络之前是否对输入进行层归一化
+                 return_intermediate_dec=True,  # 是否在解码过程中返回中间结果
+                 ):
+        super(FontModel, self).__init__()
+
+        # 图像的特征提取卷积层
+        # 此处使用一个卷积层和一个预训练的 ResNet-18 模型的特征提取器
+        # *() 将列表中的元素作为多个参数传递给 nn.Sequential，而不是将整个列表作为一个参数
+        # Downloading: "https://download.pytorch.org/models/resnet18-f37072fd.pth" to C:/Users/liuch/.cache/torch/hub/checkpoints/resnet18-f37072fd.pth
+        self.feat_encoder = nn.Sequential(*(  # 一个输入通道，输出64个通道。卷积核大小为7，步长为2，填充为3。bias=False不使用偏置项
+                [nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)]
+                +
+                # 获取了 ResNet-18 模型的子模块列表，然后去掉了列表的第一个和最后两个模块。
+                # 这些被去掉的模块通常是 ResNet-18 模型的头部，包括全局平均池化层和全连接层。
+                list(models.resnet18(weights=ResNet18_Weights.IMAGENET1K_V1).children())[1:-2]
+        ))
+    def forward(self, same_style_img_list, std_coors, char_img_gt):
+        # [bs, num_img, C, 64, 64] == [B,N,C,H,W]
+        batch_size, num_img, temp, h, w = same_style_img_list.shape
+        # [B,N,C,H,W]==>[B*N,C,h,w]
+        style_img_list = same_style_img_list.view(-1, temp, h, w)
+        logger.info(f"style_img_list shape: {style_img_list.shape}")
+
+        # 提取风格图像特征
+        # [B*N,C,h,w]==>
+        feat = self.feat_encoder(style_img_list)
+        logger.info(f"feat shape after feat_encoder: {feat.shape}")
+```
+style_img_list的shape为[B*N,C,h,w]
+feat = self.feat_encoder(style_img_list)之后
+logger.info(f"feat shape after feat_encoder: {feat.shape}")输出是什么呢?
+
+ans:
+```text
+卷积层：
+输入通道数：1
+输出通道数：64
+卷积核大小：7
+步长：2
+填充：3
+输入形状：[B*N, 1, h, w]
+输出形状：[B*N, 64, h/2, w/2]（假设输入的 h 和 w 是偶数）
+
+ResNet-18 特征提取器：
+ResNet-18 的第一个模块是一个步长为2的最大池化层，接着是4个残差块，每个残差块包含多个卷积层。
+输入形状：[B*N, 64, h/2, w/2]
+输出形状：[B*N, 512, h/32, w/32]（因为 ResNet-18 有5个步长为2的层，总共缩小了32倍）
+```
+![img_2.png](../paper/pics/img_4.png)
+这个公式的原理是基于卷积操作的定义。卷积核在输入特征图上滑动，
+每次滑动一个步长，并在每个位置上进行卷积运算。
+填充（padding）增加了输入特征图的边界，使得卷积核可以在边界上也进行卷积运算，
+从而避免输出特征图的尺寸过小。步长（stride）决定了卷积核每次滑动的距离，
+从而影响输出特征图的尺寸。
+
+---
+
+hs.shape为[1, 4004, 8, 512]
+h = hs.transpose(1, 2)[-1]这个呢?过程如何?
+
+ans:
+hs.transpose(1, 2) 会将 hs 的第1维和第2维进行交换。[1, 4004, 8, 512] 变为 [1, 8, 4004, 512]
+[-1] 取变换后张量的第0维的最后一个元素，得到形状为 [8, 4004, 512] 的张量
+
+---
  
+我在做字体风格迁移任务
+```
+class FontDataset(Dataset):
+    def __init__(self, is_train=False, is_dev=True, train_percent=0.9):
+        """
+        is_train 给训练数据集还是测试数据集
+        is_dev 在真正环境跑还是测试环境跑
+        """
+        if is_dev:
+            self.config_set = 'dev'
+        else:
+            self.config_set = 'test'
+        self.config = new_start_config
 
+        self.img_std = pickle.load(open(self.config[self.config_set]['content_pkl_path'], 'rb'))
+        self.character_std = pickle.load(open(self.config[self.config_set]['character_pkl_path'], 'rb'))
+        self.coors_std = pickle.load(open(self.config[self.config_set]['coors_pkl_path'], 'rb'))
+        self.pic_path = self.config[self.config_set]['z_pic_pkl_path']
+        self.coordinate_path = self.config[self.config_set]['z_coordinate_pkl_path']
+        self.max_stroke = 20
+        self.max_per_stroke_point = 200
+        self.num_img = 2
+
+        coors_pkl_list_all = get_files(self.coordinate_path, '.pkl')
+        pics_pkl_list_all = get_files(self.pic_path, '.pkl')
+
+        self.can_be_used_font = []
+        for i, font_pic_pkl in enumerate(pics_pkl_list_all):
+            font_name = os.path.basename(font_pic_pkl).split('.')[0]
+            for coors_pkl in coors_pkl_list_all:
+                if font_name == os.path.basename(coors_pkl).split('.')[0]:
+                    self.can_be_used_font.append(font_name)
+
+        self.font_data = []
+        self.same_style_img_dict = {}
+        for i, font_name in enumerate(self.can_be_used_font):
+            font_pic_pkl = os.path.join(self.pic_path, font_name + '.pkl')
+            font_coors_pkl = os.path.join(self.coordinate_path, font_name + '.pkl')
+
+            font_pics_list = pickle.load(open(font_pic_pkl, 'rb'))
+            font_coors_list = pickle.load(open(font_coors_pkl, 'rb'))
+
+            # 获取同一种字体的self.num_img个图片
+            random_index = random.sample(range(len(font_pics_list)), self.num_img)
+            img_list = []
+            for idx in random_index:
+                tmp_img = font_pics_list[idx]['img']
+                tmp_img = tmp_img / 255.
+                img_list.append(tmp_img)
+            self.same_style_img_dict[font_name] = img_list
+
+            for pic in font_pics_list:
+                char = pic['label']
+                """
+                文字笔画过多不要了,最多self.max_length,某个3个笔画的文字
+                [
+                    [(429.0, -43.0, 1, 0)
+                     (404.0, -53.0, 0, 0)
+                     (549.0, 56.0, 0, 1)],
+                    [(967.0, 744.0, 1, 0)
+                     (831.0, 774.0, 0, 1)],
+                    [(704.0, 130.0, 1, 0)
+                     (760.0, 692.0, 0, 1)]
+                ]
+                单个笔画坐标点太多了也不要了
+                """
+                max_per_stroke_point = max(len(sublist) for sublist in font_coors_list[char])
+                if (char in font_coors_list and
+                        len(font_coors_list[char]) <= self.max_stroke and
+                        max_per_stroke_point <= self.max_per_stroke_point):
+                    self.font_data.append(
+                        (i, font_name, pic['label'], pic['img'], font_coors_list[char])
+                    )
+                    # print('文字:', pic['label'],
+                    #       '笔画数量:', str(len(font_coors_list[char])),
+                    #       '一个笔画最多坐标点数量:', str(max_per_stroke_point))
+
+        train_size = int(len(self.font_data) * train_percent)
+        if is_train:
+            self.font_data = self.font_data[:train_size]
+        else:
+            self.font_data = self.font_data[train_size:]
+
+        self.num_sample = len(self.font_data)
+
+    def __getitem__(self, idx):
+        font_nums, font_name, label, char_img, coors = self.font_data[idx]
+        label_id = self.character_std.index(label)
+        char_img = char_img / 255.0
+        # 添加通道维度 1 * 64 * 64
+        char_img_tensor = torch.tensor(char_img, dtype=torch.float32).unsqueeze(0)
+
+        std_img_tensor = None
+        for img in self.img_std:
+            if img['label'] == label:
+                std_img = img['img'] / 255.0
+                std_img_tensor = torch.tensor(std_img, dtype=torch.float32).unsqueeze(0)
+
+        # 对coors进行padding 使其长度一致 20 * 200 * 4
+        # 1.每个字符最多包含的笔画数
+        # 2.每个笔画最多包含的点数
+        padded_coors = torch.zeros((self.max_stroke, self.max_per_stroke_point, 4), dtype=torch.float32)
+        for i, stroke in enumerate(coors):
+            if i >= self.max_stroke:
+                break
+            for j, point in enumerate(stroke):
+                if j >= self.max_per_stroke_point:
+                    break
+                padded_coors[i, j] = torch.tensor(point, dtype=torch.float32)
+        # print(padded_coors)
+        # print(padded_coors.shape)
+
+        std_coors_tensor = torch.zeros((self.max_stroke, self.max_per_stroke_point, 4), dtype=torch.float32)
+        for i, stroke in enumerate(self.coors_std[label]):
+            if i >= self.max_stroke:
+                break
+            for j, point in enumerate(stroke):
+                if j >= self.max_per_stroke_point:
+                    break
+                std_coors_tensor[i, j] = torch.tensor(point, dtype=torch.float32)
+        # print(std_coors_tensor)
+        # print(std_coors_tensor.shape)
+
+        char_img_list = self.same_style_img_dict[font_name]
+        img_list = np.expand_dims(np.array(char_img_list), 1)
+
+        output = {
+            'label_id': torch.tensor(label_id, dtype=torch.long),
+            'char_img': char_img_tensor,  # torch.Size([1, 64, 64])
+            'coordinates': padded_coors,  # torch.Size([20, 200, 4])
+            'std_img': std_img_tensor,  # torch.Size([1, 64, 64])
+            'std_coors': std_coors_tensor,  # torch.Size([20, 200, 4])
+            'same_style_img_list': torch.Tensor(img_list),  # torch.Size([img_num, C, 64, 64])
+        }
+        return output
+
+    def __len__(self):
+        return self.num_sample
+
+    def collect_function(self, batch_data):
+        batch_char_img = torch.stack([item['char_img'] for item in batch_data])  # torch.Size([bs, 1, 64, 64])
+        batch_coordinates = torch.stack([item['coordinates'] for item in batch_data])  # torch.Size([bs, 20, 200, 4])
+        batch_std_img = torch.stack([item['std_img'] for item in batch_data])  # torch.Size([bs, 1, 64, 64])
+        batch_std_coors = torch.stack([item['std_coors'] for item in batch_data])  # torch.Size([bs, 20, 200, 4])
+        batch_label_ids = torch.tensor([item['label_id'] for item in batch_data], dtype=torch.long)  # torch.Size([bs])
+        batch_same_style_img_list = torch.stack(
+            [item['same_style_img_list'] for item in batch_data])  # torch.Size([bs, num_img, C, 64, 64])
+
+        # print(batch_char_img.shape)
+        # print(batch_coordinates.shape)
+        # print(batch_label_ids.shape)
+
+        return {
+            'char_img': batch_char_img,
+            'coordinates': batch_coordinates,
+            'std_img': batch_std_img,
+            'std_coors': batch_std_coors,
+            'label_ids': batch_label_ids,
+            'same_style_img_list': batch_same_style_img_list,
+        }
+```
+
+```
+class FontLoss(nn.Module):
+    def __init__(self, coordinate_weight=1.0, stroke_weight=0.5):
+        super(FontLoss, self).__init__()
+        self.coordinate_weight = coordinate_weight
+        self.stroke_weight = stroke_weight
+        self.mse_loss = nn.MSELoss(reduction='mean')
+        self.l1_loss = nn.L1Loss(reduction='mean')
+
+    def forward(self, pred, target):
+        # 假设 pred 和 target 的形状是 [batch_size, seq_len, 4]
+        # 其中最后一维的4个值分别表示 [x, y, stroke_start, stroke_end]
+
+        # 坐标损失 (x, y)
+        coordinate_loss = self.mse_loss(pred[..., :2], target[..., :2])
+        # 笔画信息损失 (stroke_end, stroke_start)
+        stroke_loss = self.l1_loss(pred[..., 2:], target[..., 2:])
+        # 总损失
+        total_loss = self.coordinate_weight * coordinate_loss + self.stroke_weight * stroke_loss
+
+        return total_loss
+```
+
+```
+import logging
+# 设置日志
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+class FontModel(nn.Module):
+    def __init__(self,
+                 d_model=512,
+                 num_head=8,
+                 num_encoder_layers=2,
+                 num_glyph_encoder_layers=1,
+                 num_gly_decoder_layers=2,
+                 dim_feedforward=2048,  # 前馈神经网络中隐藏层的大小
+                 dropout=0.2,
+                 activation="relu",
+                 normalize_before=True,  # 应用多头注意力和前馈神经网络之前是否对输入进行层归一化
+                 return_intermediate_dec=True,  # 是否在解码过程中返回中间结果
+                 ):
+        super(FontModel, self).__init__()
+
+        # 图像的特征提取卷积层
+        # 此处使用一个卷积层和一个预训练的 ResNet-18 模型的特征提取器
+        # *() 将列表中的元素作为多个参数传递给 nn.Sequential，而不是将整个列表作为一个参数
+        # Downloading: "https://download.pytorch.org/models/resnet18-f37072fd.pth" to C:/Users/liuch/.cache/torch/hub/checkpoints/resnet18-f37072fd.pth
+        self.feat_encoder = nn.Sequential(*(  # 一个输入通道，输出64个通道。卷积核大小为7，步长为2，填充为3。bias=False不使用偏置项
+                [nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)]
+                +
+                # 获取了 ResNet-18 模型的子模块列表，然后去掉了列表的第一个和最后两个模块。
+                # 这些被去掉的模块通常是 ResNet-18 模型的头部，包括全局平均池化层和全连接层。
+                list(models.resnet18(weights=ResNet18_Weights.IMAGENET1K_V1).children())[1:-2]
+        ))
+
+        # Transformer 编码器
+        encoder_layer = TransformerEncoderLayer(
+            d_model, num_head, dim_feedforward, dropout, activation, normalize_before
+        )
+        self.base_encoder = TransformerEncoder(encoder_layer, num_encoder_layers)
+
+        # 风格特征编码器
+        glyph_norm = nn.LayerNorm(d_model) if normalize_before else None
+        self.glyph_encoder = TransformerEncoder(
+            encoder_layer, num_glyph_encoder_layers, glyph_norm
+        )
+
+        # 内容编码器 用于对输入的内容进行编码，以提取内容信息。
+        self.content_encoder = Content_TR(
+            d_model=d_model, num_encoder_layers=num_encoder_layers
+        )
+
+        # 风格特征解码器
+        glyph_decoder_layers = TransformerDecoderLayer(
+            d_model, num_head, dim_feedforward, dropout, activation
+        )
+        self.glyph_transformer_decoder = TransformerDecoder(
+            glyph_decoder_layers, num_gly_decoder_layers
+        )
+
+        # 多层感知器（MLP，Multi-Layer Perceptron)
+        # Gaussian Error Linear Unit
+        self.pro_mlp_character = nn.Sequential(
+            nn.Linear(512, 4096),
+            nn.GELU(),
+            nn.Linear(4096, 256)
+        )
+
+        """
+        添加笔画宽度和颜色装饰网络
+        width = self.stroke_width_network(features)
+        color = self.color_network(features)
+        由于 pro_mlp_writer 和 pro_mlp_character 生成的特征是 256 维度的，
+        因此 stroke_width_network 和 color_network 接收 256 维度的输入。
+        如果输入维度不同，需要根据实际情况进行调整。
+        """
+        self.stroke_width_network = nn.Sequential(
+            nn.Linear(256, 128),
+            nn.ReLU(),
+            nn.Linear(128, 1)  # 输出一个值表示笔画宽度
+        )
+        self.color_network = nn.Sequential(
+            nn.Linear(256, 128),
+            nn.ReLU(),
+            nn.Linear(128, 3)  # 输出三个值表示颜色的RGB通道
+        )
+
+        # 序列到emb (SeqtoEmb) 和 emb到序列 (EmbtoSeq)
+        # 这两个模块用于处理序列数据和嵌入数据之间的转换。
+        self.SeqtoEmb = Seq2Emb(output_dim=d_model)
+        self.EmbtoSeq = Emb2Seq(input_dim=d_model)
+        self.add_position = PositionalEncoding(dim=d_model, dropout=0.1)
+        # 参数重置 用于初始化模型的参数
+        self._init_parameters()
+
+    def _init_parameters(self):
+        for p in self.parameters():
+            """
+            如果参数的维度大于 1，则使用 Xavier 均匀初始化方法来初始化参数 p。
+            Xavier 初始化是一种常用的权重初始化方法，它确保前向传播和反向传播的信号在深度神经网络中保持平衡，
+            有助于加快训练速度和提高模型的性能。
+            总的来说，这段代码的作用是在模型中对所有二维参数（即权重矩阵）
+            使用 Xavier 均匀初始化方法进行初始化。这是一种常见的初始化策略，特别适用于深度学习模型。
+            """
+            if p.dim() > 1:
+                nn.init.xavier_uniform_(p)
+
+    def forward(self, same_style_img_list, std_coors, char_img_gt):
+        logger.info(
+            f"Input shapes: \n"
+            f"same_style_img_list={same_style_img_list.shape}\n"
+            f"std_coors={std_coors.shape}\n"
+            f"char_img_gt={char_img_gt.shape}"
+        )
+        # [bs, num_img, C, 64, 64] == [B,N,C,H,W]
+        batch_size, num_img, temp, h, w = same_style_img_list.shape
+        # [B,N,C,H,W]==>[B*N,C,h,w]
+        style_img_list = same_style_img_list.view(-1, temp, h, w)
+        logger.info(f"style_img_list shape: {style_img_list.shape}")
+
+        # 提取风格图像特征
+        # [B*N,C,h,w]==>[B*N, 64, h/2, w/2]==> [B*N, 512, h/32, w/32]
+        feat = self.feat_encoder(style_img_list)
+        logger.info(f"feat shape after feat_encoder: {feat.shape}")
+        # [B*N, 512, h/32, w/32]==>[B*N, 512, h/32 * w/32] ==> [h/32*w/32,B*N,512] = [4, 16, 512]
+        feat = feat.view(batch_size * num_img, 512, -1).permute(2, 0, 1)
+        logger.info(f"feat shape after view and permute: {feat.shape}")
+        feat = self.add_position(feat)
+        feat = self.base_encoder(feat)
+        feat = self.glyph_encoder(feat)
+
+        # 重新排列特征以分离风格和内容
+        # [h/32*w/32,B*N,512] ==> [h/32*w/32,2*B,N/2,512]
+        glyph_memory = rearrange(feat, 't (b p n) c -> t (p b) n c',
+                                 b=batch_size, p=2, n=num_img // 2)
+        logger.info(f"glyph_memory shape: {glyph_memory.shape}")
+        # [h/32*w/32,2*B,N/2,512] ==> [h/32*w/32,B,N/2,512]
+        glyph_style = glyph_memory[:, :batch_size]
+        logger.info(f"glyph_style shape: {glyph_style.shape}")
+        # [h/32*w/32,B,N/2,512] ==> [h/32*w/32*N/2,B,512]
+        glyph_style = rearrange(glyph_style, 't b n c -> (t n) b c')
+        logger.info(f"glyph_style shape after rearrange: {glyph_style.shape}")
+
+        # 处理标准坐标
+        # [8, 20, 200, 4]=[B,20,200,4] ==> [B,4000,4]
+        std_coors = rearrange(std_coors, 'b t n c -> b (t n) c')
+        logger.info(f"std_coors shape after rearrange: {std_coors.shape}")
+        # [B,4000,4]==>[B,4000,512]==>[4000,B,512]
+        seq_emb = self.SeqtoEmb(std_coors).permute(1, 0, 2)
+        logger.info(f"seq_emb shape: {seq_emb.shape}")
+
+        # 提取目标字符图像的内容特征
+        # [bs, 1, 64, 64] = [B,C,H,W]==> [B,512,H/32,W/32]==>rearrange(x,'n c h w -> (h w) n c')=[4, B, 512]
+        char_emb = self.content_encoder(char_img_gt)
+        logger.info(f"char_emb shape: {char_emb.shape}")
+
+        # 准备解码器输入
+        # [4000,B,512] + [4, B, 512] = [4004, B, 512]
+        tgt = torch.cat((char_emb, seq_emb), 0)
+        logger.info(f"tgt shape: {tgt.shape}")
+        T, N, C = tgt.shape
+        tgt_mask = generate_square_subsequent_mask(sz=(T)).to(tgt.device)
+        tgt = self.add_position(tgt)
+        logger.info(f"tgt shape after add_position: {tgt.shape}")
+
+        # 使用解码器生成预测序列
+        # [1, 4004, 8, 512]
+        hs = self.glyph_transformer_decoder(tgt, glyph_style, tgt_mask=tgt_mask)
+        logger.info(f"hs shape: {hs.shape}")
+        # [4004, 8, 512]
+        h = hs.transpose(1, 2)[-1]
+        logger.info(f"h shape: {h.shape}")
+        pred_sequence = self.EmbtoSeq(h)
+        logger.info(f"pred_sequence shape: {pred_sequence.shape}")
+
+        return pred_sequence
+
+    def inference(self, img_list):
+        self.eval()  # 切换到评估模式
+        outputs = []
+
+        with torch.no_grad():  # 禁用梯度计算以提高推理速度并节省内存
+            for img in img_list:
+                img = img.unsqueeze(0)  # 增加批次维度
+
+                pass
+
+        return outputs
+
+
+def generate_square_subsequent_mask(sz: int) -> Tensor:
+    """
+    sz：表示掩码的大小，即掩码的行数和列数。
+    Tensor：返回一个 PyTorch 张量。
+
+    torch.triu(torch.ones(sz, sz))：生成一个大小为 (sz, sz) 的上三角矩阵，
+    其中上三角部分为 1，其余部分为 0。
+    (torch.triu(torch.ones(sz, sz)) == 1)：将上三角矩阵转换为布尔张量，
+    上三角部分为 True，其余部分为 False。
+    .transpose(0, 1)：将布尔张量转置，得到一个下三角矩阵，
+    其中下三角部分为 True，其余部分为 False。
+
+    .float()：将布尔张量转换为浮点数张量。
+    .masked_fill(mask == 0, float('-inf'))：将布尔张量中值为 False（即 0）的位置填充为 float('-inf')。
+    .masked_fill(mask == 1, float(0.0))：将布尔张量中值为 True（即 1）的位置填充为 float(0.0)。
+
+    i.e. [[0, inf, inf],
+         [0, 0, inf],
+         [0, 0, 0]].
+    """
+    mask = (torch.triu(torch.ones(sz, sz)) == 1).transpose(0, 1)
+    mask = (
+        mask
+        .float()
+        .masked_fill(mask == 0, float('-inf'))
+        .masked_fill(mask == 1, float(0.0))
+    )
+    return mask
+
+
+class Seq2Emb(nn.Module):
+
+    def __init__(self, output_dim, dropout=0.1):
+        super().__init__()
+        self.fc_1 = nn.Linear(4, 256)
+        self.fc_2 = nn.Linear(256, output_dim)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, seq):
+        x = self.dropout(torch.relu(self.fc_1(seq)))
+        x = self.fc_2(x)
+        return x
+
+
+class Emb2Seq(nn.Module):
+    def __init__(self, input_dim, dropout=0.1):
+        super().__init__()
+        self.fc_1 = nn.Linear(input_dim, 256)
+        self.fc_2 = nn.Linear(256, 123)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, seq):
+        x = self.dropout(torch.relu(self.fc_1(seq)))
+        x = self.fc_2(x)
+        return x
+```
+
+```
+
+class FontTrainer:
+    def __init__(self,
+                 model, train_loader, valid_loader, criterion, optimizer, device, train_conf, data_conf):
+        self.model = model
+        self.train_loader = train_loader
+        self.valid_loader = valid_loader
+        self.criterion = criterion
+        self.optimizer = optimizer
+        self.device = device
+        self.train_conf = train_conf
+        self.data_conf = data_conf
+        self.best_loss = float('inf')
+        self.scaler = torch.cuda.amp.GradScaler()
+
+    def train(self):
+        num_epochs = self.train_conf['num_epochs']
+        max_steps = self.train_conf['MAX_STEPS']
+        logger.info(f"Start training epochs: {num_epochs}")
+        start_time = time.time()
+        step = 0
+        for epoch in range(num_epochs):
+            train_loader_iter = iter(self.train_loader)
+            try:
+                pbar = tqdm(total=len(self.train_loader), desc=f"Epoch {epoch + 1}/{num_epochs}")
+                while True:
+                    if max_steps and step >= max_steps:
+                        logger.info(
+                            f"Reached max steps: {max_steps}. Stopping training. The epoch:{epoch}. Total time: {time.time() - start_time:.2f}s")
+                        return
+                    data = next(train_loader_iter)
+                    self._train_iter(data, step)
+                    self._save_checkpoint(step)
+                    val_loss = self._valid_iter(step)
+                    if val_loss < self.best_loss:
+                        self.best_loss = val_loss
+                        self._save_best_model(step, val_loss)
+                    self._progress(step, num_epochs, start_time)
+                    step += 1
+                    pbar.update(1)
+            except StopIteration:
+                pbar.close()
+            except Exception as e:
+                logger.error(f"Error: {e}\ntrain_loader_iter_epoch failed:{epoch}")
+                return
+        logger.info(f"Training finished. Total time: {time.time() - start_time:.2f}s")
+
+    def _train_iter(self, data, step):
+        self.model.train()
+        iter_time = time.time()
+        char_img_gt = data['char_img'].to(self.device)
+        coordinates_gt = data['coordinates'].to(self.device)
+        std_img = data['std_img'].to(self.device)
+        std_coors = data['std_coors'].to(self.device)
+        label_ids = data['label_ids'].to(self.device)
+        same_style_img_list = data['same_style_img_list'].to(self.device)
+
+        # PyTorch 提供的自动混合精度训练
+        with torch.cuda.amp.autocast():
+            # torch.Size([bs, num, c, 64, 64])
+            # torch.Size([bs, 20, 200, 4])
+            # torch.Size([bs, c, 64, 64])
+            predict = self.model(same_style_img_list, std_coors, char_img_gt)
+            loss = self.criterion(predict, coordinates_gt)
+
+        self.optimizer.zero_grad()
+        self.scaler.scale(loss).backward()
+        self.scaler.step(self.optimizer)
+        self.scaler.update()
+
+        logger.info(f"Step {step}, Iteration time: {time.time() - iter_time:.4f}s, Loss: {loss.item():.4f}")
+
+    def _valid_iter(self, step):
+        self.model.eval()
+        total_loss = 0
+        with torch.no_grad():
+            for data in self.valid_loader:
+                char_img_gt = data['char_img'].to(self.device)
+                coordinates_gt = data['coordinates'].to(self.device)
+                std_img = data['std_img'].to(self.device)
+                std_coors = data['std_coors'].to(self.device)
+                label_ids = data['label_ids'].to(self.device)
+                same_style_img_list = data['same_style_img_list'].to(self.device)
+
+                predict = self.model(same_style_img_list, std_coors, char_img_gt)
+                loss = self.criterion(predict, coordinates_gt)
+                total_loss += loss.item()
+        avg_loss = total_loss / len(self.valid_loader)
+        logger.info(f"Validation loss at step {step}: {avg_loss:.4f}")
+        return avg_loss
+
+    def _save_checkpoint(self, step):
+        if step >= self.train_conf['SNAPSHOT_BEGIN'] and step % self.train_conf['SNAPSHOT_EPOCH'] == 0:
+            checkpoint_path = os.path.join(self.data_conf['save_model_dir'], f'checkpoint_step_{step}.pt')
+            model_state_dict = self.model.module.state_dict() if isinstance(self.model,
+                                                                            torch.nn.DataParallel) else self.model.state_dict()
+            torch.save({
+                'step': step,
+                'model_state_dict': model_state_dict,
+                'optimizer_state_dict': self.optimizer.state_dict(),
+                'loss': self.criterion
+            }, checkpoint_path)
+            logger.info(f"Checkpoint saved at step {step} to {checkpoint_path}")
+
+            # 只保留最近的10个检查点
+            checkpoints = sorted(
+                [f for f in os.listdir(self.data_conf['save_model_dir']) if f.startswith('checkpoint_step_')])
+            for old_checkpoint in checkpoints[:-10]:
+                os.remove(os.path.join(self.data_conf['save_model_dir'], old_checkpoint))
+
+    def _save_best_model(self, step, loss):
+        best_model_path = os.path.join(self.data_conf['save_model_dir'], 'best_model.pt')
+        model_state_dict = self.model.module.state_dict() if isinstance(self.model,
+                                                                        torch.nn.DataParallel) else self.model.state_dict()
+        torch.save({
+            'step': step,
+            'model_state_dict': model_state_dict,
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'loss': loss
+        }, best_model_path)
+        logger.info(f"Best model saved at step {step} with validation loss {loss:.4f} to {best_model_path}")
+
+    def _progress(self, step, num_epochs, start_time):
+        elapsed_time = time.time() - start_time
+        steps_per_epoch = len(self.train_loader)
+        total_steps = num_epochs * steps_per_epoch
+        eta = (elapsed_time / step) * (total_steps - step) if step > 0 else 0
+        eta_minutes, eta_seconds = divmod(eta, 60)
+        logger.info(
+            f"Step {step}/{total_steps}, ETA: {int(eta_minutes)}m {int(eta_seconds)}s, Elapsed time: {elapsed_time:.2f}s")
+```
+
+```
+def main(opt):
+    conf = new_start_config
+    train_conf = conf['train']
+    if opt.dev:
+        data_conf = conf['dev']
+    else:
+        data_conf = conf['test']
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    fix_seed(train_conf['seed'])
+    logger.info(f"seed: {train_conf['seed']}")
+
+    train_dataset = FontDataset(is_train=True, is_dev=opt.dev)
+    valid_dataset = FontDataset(is_train=False, is_dev=opt.dev)
+    logger.info(
+        f"\nThe number of training images:  {len(train_dataset)}\nThe number of valid images: {len(valid_dataset)}"
+    )
+
+    train_loader = DataLoader(train_dataset,
+                              batch_size=data_conf['PER_BATCH'],
+                              shuffle=True,
+                              drop_last=False,
+                              collate_fn=train_dataset.collect_function,
+                              num_workers=data_conf['NUM_THREADS'])
+    valid_loader = DataLoader(valid_dataset,
+                              batch_size=data_conf['PER_BATCH'],
+                              shuffle=True,
+                              drop_last=False,
+                              collate_fn=valid_dataset.collect_function,
+                              num_workers=data_conf['NUM_THREADS'])
+    model = FontModel(
+        d_model=train_conf['d_model'],
+        num_head=train_conf['num_head'],
+        num_encoder_layers=train_conf['num_encoder_layers'],
+        num_glyph_encoder_layers=train_conf['num_glyph_encoder_layers'],
+        num_gly_decoder_layers=train_conf['num_gly_decoder_layers'],
+        dim_feedforward=train_conf['dim_feedforward'],
+        dropout=train_conf['dropout'],
+        activation="relu",
+        normalize_before=True,
+        return_intermediate_dec=True,
+    )
+    if torch.cuda.device_count() > 1:
+        logger.info(f"Using {torch.cuda.device_count()} GPUs")
+        model = torch.nn.DataParallel(model)
+    elif torch.cuda.is_available():
+        logger.info("Using single GPU")
+    else:
+        logger.info("Using CPU")
+    model.to(device)
+
+    if len(opt.pretrained_model) > 0:
+        state_dict = torch.load(opt.pretrained_model)
+        if isinstance(model, torch.nn.DataParallel):
+            model.module.load_state_dict(state_dict)
+        else:
+            model.load_state_dict(state_dict)
+        logger.info('load pretrained model from {}'.format(opt.pretrained_model))
+
+    criterion = FontLoss(coordinate_weight=1.0, stroke_weight=0.5)
+    optimizer = optim.Adam(model.parameters(), lr=train_conf['LEARNING_RATE'])
+
+    logger.info(f"start training...")
+    trainer = FontTrainer(
+        model=model,
+        train_loader=train_loader,
+        valid_loader=valid_loader,
+        criterion=criterion,
+        optimizer=optimizer,
+        device=device,
+        train_conf=train_conf,
+        data_conf=data_conf,
+    )
+    trainer.train()
+```
+在执行z_train训练的时候输出报错:
+```
+INFO:z_new_start.FontModel:h shape: torch.Size([8, 4004, 512])
+INFO:z_new_start.FontModel:pred_sequence shape: torch.Size([8, 4004, 123])
+C:\Users\liuch\.conda\envs\SDTLog1\lib\site-packages\torch\nn\modules\loss.py:535: UserWarning: Using a target size (torch.Size([8, 20, 200, 2])) that is different to the input size (torch.Size([8, 4004, 2])). This will likely lead to incorrect results due to broadcasting. Please ensure they have the same size.
+  return F.mse_loss(input, target, reduction=self.reduction)
+ERROR:z_new_start.FontTrainer:Error: The size of tensor a (4004) must match the size of tensor b (200) at non-singleton dimension 2
+train_loader_iter_epoch failed:0
+```
+1.帮我指出什么原因报错的
+2.帮我结合上述想一想,应该怎么改,给出思路
+3.给出关键修改代码
 
 ---
+pred_sequence==>[8, 4004, 4]
+pred_sequence = pred_sequence[:, :T, :].view(B, self.train_conf['max_stroke'],
+                                     self.train_conf['max_per_stroke_point'], -1)
+解释一下形状变化
 
----
- 
 
+ans:
 
----
+pred_sequence[:, :T, :] 选择前 T 个时间步长，形状变为 [batch_size, T, features]。
+
+T 是 max_stroke * max_per_stroke_point，
+我们需要将 pred_sequence 的形状从 [batch_size, T, features] 
+转换为 [batch_size, max_stroke, max_per_stroke_point, features]。
+
+view(B, self.train_conf['max_stroke'], self.train_conf['max_per_stroke_point'], -1)
+view 函数用于重新调整张量的形状，使其与目标形状匹配。在这种情况下，
+-1 表示自动计算该维度的大小，以确保总元素数保持不变
+我们希望 pred_sequence 的形状与 coordinates_gt 的形状 [batch_size, max_stroke, max_per_stroke_point, 4] 匹配。
 
 ---
  

@@ -333,7 +333,7 @@ class PositionalEncoding(nn.Module):
     def __init__(self,
                  dropout,
                  dim,
-                 max_len=500):
+                 max_len=5000):
         if dim % 2 != 0:
             raise ValueError("Cannot use sin/cos positional encoding with "
                              "odd dim (got dim={:d})".format(dim))

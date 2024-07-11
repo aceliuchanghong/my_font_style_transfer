@@ -75,6 +75,7 @@ def main(opt):
         activation="relu",
         normalize_before=True,
         return_intermediate_dec=True,
+        train_conf=train_conf,
     )
     if torch.cuda.device_count() > 1:
         logger.info(f"Using {torch.cuda.device_count()} GPUs")

@@ -1,9 +1,8 @@
 import torchvision.models as models
 from torchvision.models.resnet import ResNet18_Weights
-from models.model import SeqtoEmb, EmbtoSeq
 from models.transformer import *
 from models.encoder import Content_TR
-from einops import rearrange, repeat
+from einops import rearrange
 import logging
 
 # 设置日志
@@ -23,8 +22,10 @@ class FontModel(nn.Module):
                  activation="relu",
                  normalize_before=True,  # 应用多头注意力和前馈神经网络之前是否对输入进行层归一化
                  return_intermediate_dec=True,  # 是否在解码过程中返回中间结果
+                 train_conf=None
                  ):
         super(FontModel, self).__init__()
+        self.train_conf = train_conf
 
         # 图像的特征提取卷积层
         # 此处使用一个卷积层和一个预训练的 ResNet-18 模型的特征提取器
@@ -92,8 +93,8 @@ class FontModel(nn.Module):
 
         # 序列到emb (SeqtoEmb) 和 emb到序列 (EmbtoSeq)
         # 这两个模块用于处理序列数据和嵌入数据之间的转换。
-        self.SeqtoEmb = SeqtoEmb(output_dim=d_model)
-        self.EmbtoSeq = EmbtoSeq(input_dim=d_model)
+        self.SeqtoEmb = Seq2Emb(output_dim=d_model)
+        self.EmbtoSeq = Emb2Seq(input_dim=d_model)
         self.add_position = PositionalEncoding(dim=d_model, dropout=0.1)
         # 参数重置 用于初始化模型的参数
         self._init_parameters()
@@ -114,47 +115,53 @@ class FontModel(nn.Module):
         logger.info(
             f"Input shapes: \n"
             f"same_style_img_list={same_style_img_list.shape}\n"
-            f"std_coors={std_coors.shape}\n "
+            f"std_coors={std_coors.shape}\n"
             f"char_img_gt={char_img_gt.shape}"
         )
+        # [bs, num_img, C, 64, 64] == [B,N,C,H,W]
         batch_size, num_img, temp, h, w = same_style_img_list.shape
-        # [B,N,1,h,w]==>[B*N,1,h,w]
+        # [B,N,C,H,W]==>[B*N,C,h,w]
         style_img_list = same_style_img_list.view(-1, temp, h, w)
         logger.info(f"style_img_list shape: {style_img_list.shape}")
 
         # 提取风格图像特征
+        # [B*N,C,h,w]==>[B*N, 64, h/2, w/2]==> [B*N, 512, h/32, w/32]
         feat = self.feat_encoder(style_img_list)
         logger.info(f"feat shape after feat_encoder: {feat.shape}")
-        # [B*N,512,h*w]==>[h*w,B*N,512]
+        # [B*N, 512, h/32, w/32]==>[B*N, 512, h/32 * w/32] ==> [h/32*w/32,B*N,512] = [4, 16, 512]
         feat = feat.view(batch_size * num_img, 512, -1).permute(2, 0, 1)
         logger.info(f"feat shape after view and permute: {feat.shape}")
         feat = self.add_position(feat)
-        logger.info(f"feat shape after add_position: {feat.shape}")
         feat = self.base_encoder(feat)
-        logger.info(f"feat shape after base_encoder: {feat.shape}")
         feat = self.glyph_encoder(feat)
-        logger.info(f"feat shape after glyph_encoder: {feat.shape}")
 
         # 重新排列特征以分离风格和内容
+        # [h/32*w/32,B*N,512] ==> [h/32*w/32,2*B,N/2,512]
         glyph_memory = rearrange(feat, 't (b p n) c -> t (p b) n c',
                                  b=batch_size, p=2, n=num_img // 2)
         logger.info(f"glyph_memory shape: {glyph_memory.shape}")
+        # [h/32*w/32,2*B,N/2,512] ==> [h/32*w/32,B,N/2,512]
         glyph_style = glyph_memory[:, :batch_size]
         logger.info(f"glyph_style shape: {glyph_style.shape}")
-        glyph_style = rearrange(glyph_style, 't b n c -> (t n) b c')  # [h*w*B, anchor_num, 512]
+        # [h/32*w/32,B,N/2,512] ==> [h/32*w/32*N/2,B,512]
+        glyph_style = rearrange(glyph_style, 't b n c -> (t n) b c')
         logger.info(f"glyph_style shape after rearrange: {glyph_style.shape}")
 
         # 处理标准坐标
+        # [8, 20, 200, 4]=[B,20,200,4] ==> [B,4000,4]
         std_coors = rearrange(std_coors, 'b t n c -> b (t n) c')
         logger.info(f"std_coors shape after rearrange: {std_coors.shape}")
+        # [B,4000,4]==>[B,4000,512]==>[4000,B,512]
         seq_emb = self.SeqtoEmb(std_coors).permute(1, 0, 2)
         logger.info(f"seq_emb shape: {seq_emb.shape}")
 
         # 提取目标字符图像的内容特征
+        # [bs, 1, 64, 64] = [B,C,H,W]==> [B,512,H/32,W/32]==>rearrange(x,'n c h w -> (h w) n c')=[4, B, 512]
         char_emb = self.content_encoder(char_img_gt)
         logger.info(f"char_emb shape: {char_emb.shape}")
 
         # 准备解码器输入
+        # [4000,B,512] + [4, B, 512] = [4004, B, 512]
         tgt = torch.cat((char_emb, seq_emb), 0)
         logger.info(f"tgt shape: {tgt.shape}")
         T, N, C = tgt.shape
@@ -163,24 +170,40 @@ class FontModel(nn.Module):
         logger.info(f"tgt shape after add_position: {tgt.shape}")
 
         # 使用解码器生成预测序列
+        # [1, 4004, 8, 512]
         hs = self.glyph_transformer_decoder(tgt, glyph_style, tgt_mask=tgt_mask)
         logger.info(f"hs shape: {hs.shape}")
+        # [4004, 8, 512]
         h = hs.transpose(1, 2)[-1]
         logger.info(f"h shape: {h.shape}")
         pred_sequence = self.EmbtoSeq(h)
         logger.info(f"pred_sequence shape: {pred_sequence.shape}")
 
+        B, T, _ = std_coors.shape # [B,4000,4]
+
+        pred_sequence = pred_sequence[:, :T, :].view(B, self.train_conf['max_stroke'],
+                                                     self.train_conf['max_per_stroke_point'], -1)
+        logger.info(f"pred_sequence shape after view: {pred_sequence.shape}")
         return pred_sequence
 
     def inference(self, img_list):
         self.eval()  # 切换到评估模式
+        device = next(self.parameters()).device
         outputs = []
 
         with torch.no_grad():  # 禁用梯度计算以提高推理速度并节省内存
             for img in img_list:
-                img = img.unsqueeze(0)  # 增加批次维度
+                img = img.unsqueeze(0).to(device)  # 增加批次维度并移动到设备上
 
-                pass
+                # 假设 std_coors 和 char_img_gt 是推理过程中需要的其他输入
+                std_coors = torch.zeros((1, self.max_stroke, self.max_per_stroke_point, 4)).to(device)
+                char_img_gt = img  # 在推理过程中，char_img_gt 可以是输入图像本身
+
+                # 调用模型的 forward 方法进行推理
+                pred_sequence = self.forward(img, std_coors, char_img_gt)
+
+                # 将预测结果添加到输出列表中
+                outputs.append(pred_sequence.cpu().numpy())  # 转换为 numpy 数组以便后续处理
 
         return outputs
 
@@ -213,3 +236,30 @@ def generate_square_subsequent_mask(sz: int) -> Tensor:
         .masked_fill(mask == 1, float(0.0))
     )
     return mask
+
+
+class Seq2Emb(nn.Module):
+
+    def __init__(self, output_dim, dropout=0.1):
+        super().__init__()
+        self.fc_1 = nn.Linear(4, 256)
+        self.fc_2 = nn.Linear(256, output_dim)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, seq):
+        x = self.dropout(torch.relu(self.fc_1(seq)))
+        x = self.fc_2(x)
+        return x
+
+
+class Emb2Seq(nn.Module):
+    def __init__(self, input_dim, dropout=0.1):
+        super().__init__()
+        self.fc_1 = nn.Linear(input_dim, 256)
+        self.fc_2 = nn.Linear(256, 4)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, seq):
+        x = self.dropout(torch.relu(self.fc_1(seq)))
+        x = self.fc_2(x)
+        return x

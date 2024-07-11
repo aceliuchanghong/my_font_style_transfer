@@ -25,8 +25,8 @@ class FontDataset(Dataset):
         self.coors_std = pickle.load(open(self.config[self.config_set]['coors_pkl_path'], 'rb'))
         self.pic_path = self.config[self.config_set]['z_pic_pkl_path']
         self.coordinate_path = self.config[self.config_set]['z_coordinate_pkl_path']
-        self.max_stroke = 20
-        self.max_per_stroke_point = 200
+        self.max_stroke = self.config['train']['max_stroke']
+        self.max_per_stroke_point = self.config['train']['max_per_stroke_point']
         self.num_img = 2
 
         coors_pkl_list_all = get_files(self.coordinate_path, '.pkl')

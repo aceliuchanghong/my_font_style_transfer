@@ -65,11 +65,13 @@ class FontTrainer:
         label_ids = data['label_ids'].to(self.device)
         same_style_img_list = data['same_style_img_list'].to(self.device)
 
+        # PyTorch 提供的自动混合精度训练
         with torch.cuda.amp.autocast():
             # torch.Size([bs, num, c, 64, 64])
             # torch.Size([bs, 20, 200, 4])
             # torch.Size([bs, c, 64, 64])
             predict = self.model(same_style_img_list, std_coors, char_img_gt)
+            assert predict.shape == coordinates_gt.shape, f"Shape mismatch: predict {predict.shape}, coordinates_gt {coordinates_gt.shape}"
             loss = self.criterion(predict, coordinates_gt)
 
         self.optimizer.zero_grad()

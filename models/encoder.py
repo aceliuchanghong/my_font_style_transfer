@@ -30,6 +30,7 @@ class Content_TR(nn.Module):
         self.encoder = TransformerEncoder(encoder_layer, num_encoder_layers, norm=encoder_norm)
 
     def forward(self, x):
+        # [B,C,H,W]==>[B,512,H/32,W/32]
         x = self.Feat_Encoder(x)
         """
         'n c h w -> (h w) n c'：这个字符串定义了输入张量的维度。它有四个维度：n、c、h和w。每个字母代表一个维度，它们的顺序是从最外层到最内层。
