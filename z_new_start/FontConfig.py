@@ -23,7 +23,7 @@ new_start_config = {
         'seed': 2024,
         'num_epochs': 20,
         'LEARNING_RATE': 0.001,
-        'MAX_STEPS': 200000,
+        'MAX_STEPS': 200,
         'SNAPSHOT_BEGIN': 2000,
         'SNAPSHOT_EPOCH': 2000,
         'VALIDATE_BEGIN': 2000,

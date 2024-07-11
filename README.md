@@ -1,4 +1,3 @@
-## Style-Disentangled Transformer(SDT)
 
 论文总体框架
 
@@ -152,7 +151,7 @@ git clone https://github.com/aceliuchanghong/PngToTTF
 ### 📂 Folder Structure
 
 ```
-SDT/
+my_font_style_transfer/
 |
 ├── README.md
 ├── evaluate.py

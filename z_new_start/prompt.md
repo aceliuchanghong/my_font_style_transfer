@@ -1566,9 +1566,617 @@ embedding_dim 是通道数，即特征的深度。
 
 ---
 
+解释 img_list = np.expand_dims(np.array(char_img_list), 1)
+ans:
+这一行代码的目的是将 char_img_list 转换为一个 NumPy 数组，
+并在数组的第一个维度上添加一个新维度。具体解释如下：
+np.array(char_img_list): 将 char_img_list 转换为一个 NumPy 数组。
+np.expand_dims(数组, 轴): 在指定的轴上添加一个新维度。
+在这个特定的例子中，char_img_list 是一个包含图像的列表。假设每个图像的大小为 (64, 64)，
+np.array(char_img_list) 的结果是一个形状为 (num_img, 64, 64) 的数组。
+通过 np.expand_dims(np.array(char_img_list), 1)，结果是一个形状为 (num_img, 1, 64, 64)的数组。
+---
+
+batch_size, num_img, temp, h, w = same_style_img_list.shape
+style_img = same_style_img_list.view(-1, in_planes, h, w)解释一下用法,指出shape变化
+
+ans:
+same_style_img_list.view(-1, in_planes, h, w) 
+将张量重新塑形。-1 表示该维度的大小由其他维度的大小自动推断得出。
+(batch_size, num_img, temp, h, w)==>(batch_size * num_img, temp, h, w)
+---
+
+```
+class SDT_Generator(nn.Module):
+
+    def __init__(self,
+                 d_model=512,
+                 nhead=8,
+                 num_encoder_layers=2,
+                 num_head_layers=1,
+                 wri_dec_layers=2,
+                 gly_dec_layers=2,
+                 dim_feedforward=2048,
+                 dropout=0.1,
+                 activation="relu",
+                 normalize_before=True,
+                 return_intermediate_dec=True):
+        super(SDT_Generator, self).__init__()
+        """
+        # 假设我们有一些模块列表
+        modules = [
+            nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2),
+            # ... 其他模块
+        ]
+        
+        # 直接将列表传递给 nn.Sequential
+        model = nn.Sequential(modules)
+        """
+        # style encoder with dual heads
+        # Feat_Encoder 是一个卷积层和一个预训练的 ResNet-18 模型的特征提取器，它可以用于提取图像的特征
+        self.Feat_Encoder = nn.Sequential(*(  # 一个输入通道，输出64个通道。卷积核大小为7，步长为2，填充为3。bias 设置为 False 表示不使用偏置项。
+                [nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)]
+                +
+                # 获取了 ResNet-18 模型的子模块列表，然后去掉了列表的第一个和最后两个模块。
+                # 这些被去掉的模块通常是 ResNet-18 模型的头部，包括全局平均池化层和全连接层。
+                # 从列表的第二个元素开始，一直到倒数第三个元素结束，不包括这两个元素
+                list(models.resnet18(weights=ResNet18_Weights.IMAGENET1K_V1).children())[1:-2]
+        ))
+        encoder_layer = TransformerEncoderLayer(
+            d_model, nhead, dim_feedforward, dropout, activation, normalize_before
+        )
+        # Transformer 编码器 用于对输入的特征进行编码，以提取全局的风格信息。
+        self.base_encoder = TransformerEncoder(encoder_layer, num_encoder_layers, None)
+        writer_norm = nn.LayerNorm(d_model) if normalize_before else None
+        glyph_norm = nn.LayerNorm(d_model) if normalize_before else None
+        # Writer Head 和 Glyph Head: 这两个头部分别用于提取作者风格和字符风格。
+        # 它们使用相同的 Transformer 编码器层，但可以有不同的层数。
+        self.writer_head = TransformerEncoder(encoder_layer, num_head_layers, writer_norm)
+        self.glyph_head = TransformerEncoder(encoder_layer, num_head_layers, glyph_norm)
+
+        # content encoder
+        # 内容编码器 用于对输入的内容进行编码，以提取内容信息。
+        self.content_encoder = Content_TR(d_model=d_model, num_encoder_layers=num_encoder_layers)
+
+        # decoder for receiving writer-wise and character-wise styles
+        decoder_layer = TransformerDecoderLayer(
+            d_model, nhead, dim_feedforward, dropout, activation, normalize_before
+        )
+        wri_decoder_norm = nn.LayerNorm(d_model) if normalize_before else None
+        self.wri_decoder = TransformerDecoder(
+            decoder_layer, wri_dec_layers, wri_decoder_norm, return_intermediate=return_intermediate_dec
+        )
+        gly_decoder_norm = nn.LayerNorm(d_model) if normalize_before else None
+        self.gly_decoder = TransformerDecoder(
+            decoder_layer, gly_dec_layers, gly_decoder_norm, return_intermediate=return_intermediate_dec
+        )
+
+        # two 多层感知器(mlp)s that project style features into the space where nce_loss is applied
+        # 用于将提取的风格特征投影到一个较低维度的空间
+        # 将风格特征从高维空间投影到一个较低维度的空间。这个过程通常被称为特征提取或降维，因为它可以帮助模型更有效地处理数据。
+        self.pro_mlp_writer = nn.Sequential(
+            nn.Linear(512, 4096),
+            nn.GELU(),
+            nn.Linear(4096, 256)
+        )
+        self.pro_mlp_character = nn.Sequential(
+            nn.Linear(512, 4096),
+            nn.GELU(),
+            nn.Linear(4096, 256)
+        )
+        # 序列到嵌入 (SeqtoEmb) 和 嵌入到序列 (EmbtoSeq)
+        # 这两个模块用于处理序列数据和嵌入数据之间的转换。
+        self.SeqtoEmb = SeqtoEmb(output_dim=d_model)
+        self.EmbtoSeq = EmbtoSeq(input_dim=d_model)
+        self.add_position = PositionalEncoding(dropout=0.1, dim=d_model)
+        # 参数重置 用于初始化模型的参数
+        self._reset_parameters()
+
+    def _reset_parameters(self):
+        for p in self.parameters():
+            """
+            如果参数的维度大于 1，则使用 Xavier 均匀初始化方法来初始化参数 p。
+            Xavier 初始化是一种常用的权重初始化方法，它确保前向传播和反向传播的信号在深度神经网络中保持平衡，
+            有助于加快训练速度和提高模型的性能。
+            总的来说，这段代码的作用是在模型中对所有二维参数（即权重矩阵）
+            使用 Xavier 均匀初始化方法进行初始化。这是一种常见的初始化策略，特别适用于深度学习模型。
+            """
+            if p.dim() > 1:
+                nn.init.xavier_uniform_(p)
+
+    def random_double_sampling(self, x, ratio=0.25):
+        """
+        它用于在序列数据中进行双重采样。双重采样通常用于训练序列模型
+        通过随机排序每个组内的序列元素来生成锚点和正样本，从而在训练序列模型时提供正样本对。
+
+        例如Transformer，以便在每个批次中生成正样本对（例如，一个输入序列和其对应的目标序列）。
+        random_double_sampling方法接受一个四维的输入张量x，形状为[L, B, N, D]，其中：
+        L是序列的长度。
+        B是批次大小。
+        N是每个序列中要采样的组数。
+        D是每个组的维度。
+
+        Sample the positive pair (i.e., o and o^+) within a character by per-sample shuffling.
+        Per-sample shuffling is done by argsort random noise.
+        x: [L, B, N, D], sequence
+        return o [B, N, 1, D], o^+ [B, N, 1, D]
+        """
+        L, B, N, D = x.shape  # length, batch, group_number, dim
+        x = rearrange(x, "L B N D -> B N L D")
+        # 这个噪声张量用于对每个组内的序列进行随机排序。 noise in [0, 1]
+        noise = torch.rand(B, N, L, device=x.device)
+        # sort noise for each sample
+        ids_shuffle = torch.argsort(noise, dim=2)
+
+        # 计算出需要保留的锚点（anchor）和正样本（positive）的数量。
+        # 锚点数量是总长度的ratio倍，正样本数量是锚点数量的2倍。
+        anchor_tokens, pos_tokens = int(L * ratio), int(L * 2 * ratio)
+        ids_keep_anchor, ids_keep_pos = ids_shuffle[:, :, :anchor_tokens], ids_shuffle[:, :, anchor_tokens:pos_tokens]
+        x_anchor = torch.gather(
+            x, dim=2, index=ids_keep_anchor.unsqueeze(-1).repeat(1, 1, 1, D))
+        x_pos = torch.gather(
+            x, dim=2, index=ids_keep_pos.unsqueeze(-1).repeat(1, 1, 1, D))
+        return x_anchor, x_pos
+
+    # the shape of style_imgs is [B, 2*N, C, H, W] during training
+    def forward(self, style_imgs, seq, char_img):
+ 
+        batch_size, num_imgs, in_planes, h, w = style_imgs.shape
+
+        style_imgs = style_imgs.view(-1, in_planes, h, w)  # [B*2N, C:1, H, W]
+        style_embe = self.Feat_Encoder(style_imgs)  # [B*2N, C:512, 2, 2]
+
+        anchor_num = num_imgs // 2
+        # [4, B*2N, C:512] permute,改变张量的维度顺序
+        style_embe = style_embe.view(batch_size * num_imgs, 512, -1).permute(2, 0, 1)
+        FEAT_ST_ENC = self.add_position(style_embe)
+
+        memory = self.base_encoder(FEAT_ST_ENC)  # [4, B*2N, C]
+        writer_memory = self.writer_head(memory)
+        glyph_memory = self.glyph_head(memory)
+
+        writer_memory = rearrange(writer_memory, 't (b p n) c -> t (p b) n c',
+                                  b=batch_size, p=2, n=anchor_num)  # [4, 2*B, N, C]
+        glyph_memory = rearrange(glyph_memory, 't (b p n) c -> t (p b) n c',
+                                 b=batch_size, p=2, n=anchor_num) 
+```             
+1.forward方法里面帮我指出张量的结构变化
+2.glyph_memory = rearrange... 这儿有什么作用?
+
+---
+
+锚点数为什么需要呢?有什么作用
+
+ans:
+```text
+锚点数（anchor number）在深度学习和计算机视觉中通常用于目标检测和分割任务。锚点（anchor）是指在图像中预定义的一些框，这些框具有不同的尺寸和长宽比，用于预测可能包含目标的区域。锚点数的作用主要体现在以下几个方面：
+
+多尺度检测：通过设置不同尺寸和长宽比的锚点，可以覆盖图像中不同大小和形状的目标，从而实现多尺度的目标检测。
+
+减少计算量：预定义的锚点可以减少需要检测的候选区域数量，从而减少计算量，提高检测效率。
+
+提高召回率：通过设置多个锚点，可以增加检测到目标的概率，从而提高召回率。
+
+辅助训练：锚点可以作为训练时的参考框，帮助模型学习如何调整预测框的位置和大小，以更好地匹配目标。
+
+在您提供的代码中，锚点数 anchor_num 是通过 num_imgs // 2 计算得到的，这意味着每对图像中有一个锚点。这种设计可能是为了在训练过程中生成正样本对（例如，一个输入序列和其对应的目标序列），从而在训练序列模型时提供正样本对。
+
+总之，锚点数的设计是为了更好地适应不同大小和形状的目标，提高检测的准确性和效率。
+```
+
+---
+```
+class SDT_Generator(nn.Module):
+
+    def __init__(self,
+                 d_model=512,
+                 nhead=8,
+                 num_encoder_layers=2,
+                 num_head_layers=1,
+                 wri_dec_layers=2,
+                 gly_dec_layers=2,
+                 dim_feedforward=2048,
+                 dropout=0.1,
+                 activation="relu",
+                 normalize_before=True,
+                 return_intermediate_dec=True):
+        super(SDT_Generator, self).__init__()
+        """
+        # 假设我们有一些模块列表
+        modules = [
+            nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2),
+            # ... 其他模块
+        ]
+        
+        # 直接将列表传递给 nn.Sequential
+        model = nn.Sequential(modules)
+        """
+        # style encoder with dual heads
+        # Feat_Encoder 是一个卷积层和一个预训练的 ResNet-18 模型的特征提取器，它可以用于提取图像的特征
+        self.Feat_Encoder = nn.Sequential(*(  # 一个输入通道，输出64个通道。卷积核大小为7，步长为2，填充为3。bias 设置为 False 表示不使用偏置项。
+                [nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)]
+                +
+                # 获取了 ResNet-18 模型的子模块列表，然后去掉了列表的第一个和最后两个模块。
+                # 这些被去掉的模块通常是 ResNet-18 模型的头部，包括全局平均池化层和全连接层。
+                # 从列表的第二个元素开始，一直到倒数第三个元素结束，不包括这两个元素
+                list(models.resnet18(weights=ResNet18_Weights.IMAGENET1K_V1).children())[1:-2]
+        ))
+        encoder_layer = TransformerEncoderLayer(
+            d_model, nhead, dim_feedforward, dropout, activation, normalize_before
+        )
+        # Transformer 编码器 用于对输入的特征进行编码，以提取全局的风格信息。
+        self.base_encoder = TransformerEncoder(encoder_layer, num_encoder_layers, None)
+        writer_norm = nn.LayerNorm(d_model) if normalize_before else None
+        glyph_norm = nn.LayerNorm(d_model) if normalize_before else None
+        # Writer Head 和 Glyph Head: 这两个头部分别用于提取作者风格和字符风格。
+        # 它们使用相同的 Transformer 编码器层，但可以有不同的层数。
+        self.writer_head = TransformerEncoder(encoder_layer, num_head_layers, writer_norm)
+        self.glyph_head = TransformerEncoder(encoder_layer, num_head_layers, glyph_norm)
+
+        # content encoder
+        # 内容编码器 用于对输入的内容进行编码，以提取内容信息。
+        self.content_encoder = Content_TR(d_model=d_model, num_encoder_layers=num_encoder_layers)
+
+        # decoder for receiving writer-wise and character-wise styles
+        decoder_layer = TransformerDecoderLayer(
+            d_model, nhead, dim_feedforward, dropout, activation, normalize_before
+        )
+        wri_decoder_norm = nn.LayerNorm(d_model) if normalize_before else None
+        self.wri_decoder = TransformerDecoder(
+            decoder_layer, wri_dec_layers, wri_decoder_norm, return_intermediate=return_intermediate_dec
+        )
+        gly_decoder_norm = nn.LayerNorm(d_model) if normalize_before else None
+        self.gly_decoder = TransformerDecoder(
+            decoder_layer, gly_dec_layers, gly_decoder_norm, return_intermediate=return_intermediate_dec
+        )
+
+        # two 多层感知器(mlp)s that project style features into the space where nce_loss is applied
+        # 用于将提取的风格特征投影到一个较低维度的空间
+        # 将风格特征从高维空间投影到一个较低维度的空间。这个过程通常被称为特征提取或降维，因为它可以帮助模型更有效地处理数据。
+        self.pro_mlp_writer = nn.Sequential(
+            nn.Linear(512, 4096),
+            nn.GELU(),
+            nn.Linear(4096, 256)
+        )
+        self.pro_mlp_character = nn.Sequential(
+            nn.Linear(512, 4096),
+            nn.GELU(),
+            nn.Linear(4096, 256)
+        )
+        # 序列到嵌入 (SeqtoEmb) 和 嵌入到序列 (EmbtoSeq)
+        # 这两个模块用于处理序列数据和嵌入数据之间的转换。
+        self.SeqtoEmb = SeqtoEmb(output_dim=d_model)
+        self.EmbtoSeq = EmbtoSeq(input_dim=d_model)
+        self.add_position = PositionalEncoding(dropout=0.1, dim=d_model)
+        # 参数重置 用于初始化模型的参数
+        self._reset_parameters()
+
+    def _reset_parameters(self):
+        for p in self.parameters():
+            """
+            如果参数的维度大于 1，则使用 Xavier 均匀初始化方法来初始化参数 p。
+            Xavier 初始化是一种常用的权重初始化方法，它确保前向传播和反向传播的信号在深度神经网络中保持平衡，
+            有助于加快训练速度和提高模型的性能。
+            总的来说，这段代码的作用是在模型中对所有二维参数（即权重矩阵）
+            使用 Xavier 均匀初始化方法进行初始化。这是一种常见的初始化策略，特别适用于深度学习模型。
+            """
+            if p.dim() > 1:
+                nn.init.xavier_uniform_(p)
+
+    def random_double_sampling(self, x, ratio=0.25):
+        """
+        它用于在序列数据中进行双重采样。双重采样通常用于训练序列模型
+        通过随机排序每个组内的序列元素来生成锚点和正样本，从而在训练序列模型时提供正样本对。
+
+        例如Transformer，以便在每个批次中生成正样本对（例如，一个输入序列和其对应的目标序列）。
+        random_double_sampling方法接受一个四维的输入张量x，形状为[L, B, N, D]，其中：
+        L是序列的长度。
+        B是批次大小。
+        N是每个序列中要采样的组数。
+        D是每个组的维度。
+
+        Sample the positive pair (i.e., o and o^+) within a character by per-sample shuffling.
+        Per-sample shuffling is done by argsort random noise.
+        x: [L, B, N, D], sequence
+        return o [B, N, 1, D], o^+ [B, N, 1, D]
+        """
+        L, B, N, D = x.shape  # length, batch, group_number, dim
+        x = rearrange(x, "L B N D -> B N L D")
+        # 这个噪声张量用于对每个组内的序列进行随机排序。 noise in [0, 1]
+        noise = torch.rand(B, N, L, device=x.device)
+        # sort noise for each sample
+        ids_shuffle = torch.argsort(noise, dim=2)
+
+        # 计算出需要保留的锚点（anchor）和正样本（positive）的数量。
+        # 锚点数量是总长度的ratio倍，正样本数量是锚点数量的2倍。
+        anchor_tokens, pos_tokens = int(L * ratio), int(L * 2 * ratio)
+        ids_keep_anchor, ids_keep_pos = ids_shuffle[:, :, :anchor_tokens], ids_shuffle[:, :, anchor_tokens:pos_tokens]
+        x_anchor = torch.gather(
+            x, dim=2, index=ids_keep_anchor.unsqueeze(-1).repeat(1, 1, 1, D))
+        x_pos = torch.gather(
+            x, dim=2, index=ids_keep_pos.unsqueeze(-1).repeat(1, 1, 1, D))
+        return x_anchor, x_pos
+
+    def forward(self, same_style_img_list, std_coors, char_img_gt):
+        batch_size, num_img, temp, h, w = same_style_img_list.shape
+        style_img_list = same_style_img_list.view(-1, temp, h, w)  # [B*N,1,h,w]
+        # 特征提取
+        feat = self.feat_encoder(style_img_list)  # 提取图像特征
+        anchor_num = num_img // 2
+        #  [height * width, batch_size, 1]
+        feat = feat.view(batch_size * num_img, 512, -1).permute(2, 0, 1)  # [B*N,512,h*w]==>[h*w,B*N,512]
+
+        feat = self.add_position(feat)
+```             
+```
+class PositionalEncoding(nn.Module):
+    """Sinusoidal positional encoding for non-recurrent neural networks.
+
+    Implementation based on "Attention Is All You Need"
+    :cite:`DBLP:journals/corr/VaswaniSPUJGKP17`
+
+    Args:
+       dropout (float): dropout parameter
+       dim (int): embedding size
+    """
+
+    def __init__(self,
+                 dropout,
+                 dim,
+                 max_len=500):
+        if dim % 2 != 0:
+            raise ValueError("Cannot use sin/cos positional encoding with "
+                             "odd dim (got dim={:d})".format(dim))
+        pe = torch.zeros(max_len, dim)
+        position = torch.arange(0, max_len).unsqueeze(1)
+        div_term = torch.exp((torch.arange(0, dim, 2, dtype=torch.float) *
+                              -(math.log(10000.0) / dim)))
+        # 选择了pe张量的所有行，以及从第0列开始，每隔一列的列
+        pe[:, 0::2] = torch.sin(position.float() * div_term)
+        pe[:, 1::2] = torch.cos(position.float() * div_term)
+        pe = pe.unsqueeze(1)
+        super(PositionalEncoding, self).__init__()
+        self.register_buffer('pe', pe)
+        self.dropout = nn.Dropout(p=dropout)
+        self.dim = dim
+
+    def forward(self, emb, step=None):
+        """Embed inputs.
+        Args:
+            emb (FloatTensor): Sequence of word vectors
+                ``(seq_len, batch_size, self.dim)``
+            step (int or NoneType): If stepwise (``seq_len = 1``), use
+                the encoding for this position.
+        """
+        emb = emb * math.sqrt(self.dim)
+        if step is None:
+            emb = emb + self.pe[:emb.size(0)]
+        else:
+            emb = emb + self.pe[step]
+        emb = self.dropout(emb)
+        return emb
+```
+这儿feat = self.add_position(feat),输入的feat是[h*w,B*N,512],
+1.满足输入条件吗?
+2.输出出来是什么形状,怎么判断的?
+
+---
+
+glyph_memory = rearrange(feat, 't (b p n) c -> t (p b) n c',
+                                 b=batch_size, p=2, n=anchor_num)
+如果feat是[h*w,B*N,512],那么glyph_memory 是什么样子?
+
+ans:
+[h*w, B*N, 512]
+(b p n) 表示 B*N 可以分解为 (b * p * n)  因此，B*N = batch_size * 2 * anchor_num
+[h*w, 2 * batch_size, anchor_num, 512]
+
+---
+ 
+char_emb为[h*w,bs,c]
+解释一下
+char_emb = torch.mean(char_emb, 0)  # [N, 512]
+char_emb = repeat(char_emb, 'n c -> t n c', t=1)
+分别是什么形状,怎么算的?
+
+ans:
+```text
+char_emb = torch.mean(char_emb, 0)
+这里我们对 char_emb 沿着第一个维度（即 h*w 维度）取平均值。
+这意味着我们将每个像素位置的特征取平均，得到一个形状为 [bs, c] 的张量。
+因此，char_emb 的形状变为 [bs, c]。
+
+char_emb = repeat(char_emb, 'n c -> t n c', t=1)
+这里我们使用 repeat 函数对 char_emb 进行扩展。
+repeat 函数的参数 'n c -> t n c' 表示将 char_emb 的形状从 [n, c] 扩展到 [t, n, c]。
+由于我们设置 t=1，这意味着我们只是在 t 维度上重复一次，实际上并没有改变形状。
+因此，char_emb 的形状仍然是 [bs, c]。
+```
+
+---
+
+glyph_decoder_layers = TransformerDecoderLayer(
+            d_model, num_head, dim_feedforward, dropout, activation
+        )
+self.glyph_transformer_decoder = TransformerDecoder(
+            glyph_decoder_layers, num_gly_decoder_layers
+        )
+
+class TransformerDecoder(nn.Module):
+
+    def __init__(self,
+                 decoder_layer,
+                 num_layers,
+                 norm=None,
+                 return_intermediate=False):
+        super().__init__()
+        self.layers = _get_clones(decoder_layer, num_layers)
+        self.num_layers = num_layers
+        self.norm = norm
+        """
+        模型是否返回每个解码层的中间输出。
+        如果return_intermediate被设置为True，那么在解码过程中，模型会返回每个解码层的输出。
+        这对于理解模型在处理数据时的中间步骤非常有用，因为它允许我们观察到数据是如何在解码器中被逐步转换的。
+        例如，如果你在做图像分割任务，并且想要观察模型在处理图像时不同层次的特征图，
+        那么return_intermediate参数就非常有用。你可以选择在最后一层解码器输出最终的分割结果，
+        或者在每一层解码器输出中间结果，以便于分析和调试。
+        """
+        self.return_intermediate = return_intermediate
+
+    def forward(self, tgt, memory,
+                tgt_mask: Optional[Tensor] = None,
+                memory_mask: Optional[Tensor] = None,
+                tgt_key_padding_mask: Optional[Tensor] = None,
+                memory_key_padding_mask: Optional[Tensor] = None,
+                pos: Optional[Tensor] = None,
+                query_pos: Optional[Tensor] = None):
+        output = tgt
+
+        intermediate = []
+
+        for layer in self.layers:
+            output = layer(output, memory, tgt_mask=tgt_mask,
+                           memory_mask=memory_mask,
+                           tgt_key_padding_mask=tgt_key_padding_mask,
+                           memory_key_padding_mask=memory_key_padding_mask,
+                           pos=pos, query_pos=query_pos)
+            if self.return_intermediate:
+                intermediate.append(self.norm(output))
+
+        if self.norm is not None:
+            output = self.norm(output)
+            if self.return_intermediate:
+                intermediate.pop()
+                intermediate.append(output)
+
+        if self.return_intermediate:
+            return torch.stack(intermediate)
+
+        return output.unsqueeze(0)
+
+那么
+glyph_style:[h*w*B, anchor_num, 512]
+tgt = torch.cat((char_emb, seq_emb), 0)  # [1+T], put the content token as the first token
+tgt_mask = generate_square_subsequent_mask(sz=(T + 1)).to(tgt)
+tgt = self.add_position(tgt)
+hs = self.glyph_transformer_decoder(tgt, glyph_style, tgt_mask=tgt_mask)
+hs的形状是?怎么变化的
+
+---
+ 
+
+
 ---
 
 ---
+ 
+
+
+---
+
+---
+ 
+
+
+---
+
+---
+ 
+
+
+---
+
+---
+ 
+
+
+---
+
+---
+ 
+
+
+---
+
+---
+ 
+
+
+---
+
+---
+ 
+
+
+---
+
+---
+ 
+
+
+---
+
+---
+ 
+
+
+---
+
+---
+ 
+
+
+---
+
+---
+ 
+
+
+---
+
+---
+ 
+
+
+---
+
+---
+ 
+
+
+---
+
+---
+ 
+
+
+---
+
+---
+ 
+
+
+---
+
+---
+ 
+
+
+---
+
+---
+ 
+
+
+---
+
+---
+ 
+
 
 ---
 

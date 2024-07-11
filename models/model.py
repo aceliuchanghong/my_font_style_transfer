@@ -174,9 +174,6 @@ class SDT_Generator(nn.Module):
         # 风格图片的批次大小、图片数量、通道数、高度和宽度。
         batch_size, num_imgs, in_planes, h, w = style_imgs.shape
 
-        # style_imgs: [B, 2*N, C:1, H, W] -> FEAT_ST_ENC: [4*N, B, C:512]
-        # -1是一个特殊的值，表示该维度的大小将通过其他维度的大小和总元素数自动推断出来
-        # 调整风格图像的形状
         style_imgs = style_imgs.view(-1, in_planes, h, w)  # [B*2N, C:1, H, W]
         style_embe = self.Feat_Encoder(style_imgs)  # [B*2N, C:512, 2, 2]
 

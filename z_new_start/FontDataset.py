@@ -4,6 +4,8 @@ import pickle
 import torch
 from utils.judge_font import get_files
 from z_new_start.FontConfig import new_start_config
+import random
+import numpy as np
 
 
 class FontDataset(Dataset):
@@ -25,6 +27,7 @@ class FontDataset(Dataset):
         self.coordinate_path = self.config[self.config_set]['z_coordinate_pkl_path']
         self.max_stroke = 20
         self.max_per_stroke_point = 200
+        self.num_img = 2
 
         coors_pkl_list_all = get_files(self.coordinate_path, '.pkl')
         pics_pkl_list_all = get_files(self.pic_path, '.pkl')
@@ -37,12 +40,22 @@ class FontDataset(Dataset):
                     self.can_be_used_font.append(font_name)
 
         self.font_data = []
+        self.same_style_img_dict = {}
         for i, font_name in enumerate(self.can_be_used_font):
             font_pic_pkl = os.path.join(self.pic_path, font_name + '.pkl')
             font_coors_pkl = os.path.join(self.coordinate_path, font_name + '.pkl')
 
             font_pics_list = pickle.load(open(font_pic_pkl, 'rb'))
             font_coors_list = pickle.load(open(font_coors_pkl, 'rb'))
+
+            # 获取同一种字体的self.num_img个图片
+            random_index = random.sample(range(len(font_pics_list)), self.num_img)
+            img_list = []
+            for idx in random_index:
+                tmp_img = font_pics_list[idx]['img']
+                tmp_img = tmp_img / 255.
+                img_list.append(tmp_img)
+            self.same_style_img_dict[font_name] = img_list
 
             for pic in font_pics_list:
                 char = pic['label']
@@ -81,15 +94,14 @@ class FontDataset(Dataset):
     def __getitem__(self, idx):
         font_nums, font_name, label, char_img, coors = self.font_data[idx]
         label_id = self.character_std.index(label)
-        char_img = char_img / 255
+        char_img = char_img / 255.0
         # 添加通道维度 1 * 64 * 64
         char_img_tensor = torch.tensor(char_img, dtype=torch.float32).unsqueeze(0)
 
         std_img_tensor = None
-        std_coors_tensor = None
         for img in self.img_std:
             if img['label'] == label:
-                std_img = img['img'] / 255
+                std_img = img['img'] / 255.0
                 std_img_tensor = torch.tensor(std_img, dtype=torch.float32).unsqueeze(0)
 
         # 对coors进行padding 使其长度一致 20 * 200 * 4
@@ -117,12 +129,16 @@ class FontDataset(Dataset):
         # print(std_coors_tensor)
         # print(std_coors_tensor.shape)
 
+        char_img_list = self.same_style_img_dict[font_name]
+        img_list = np.expand_dims(np.array(char_img_list), 1)
+
         output = {
             'label_id': torch.tensor(label_id, dtype=torch.long),
-            'char_img': char_img_tensor,
-            'coordinates': padded_coors,
-            'std_img': std_img_tensor,
-            'std_coors': std_coors_tensor,
+            'char_img': char_img_tensor,  # torch.Size([1, 64, 64])
+            'coordinates': padded_coors,  # torch.Size([20, 200, 4])
+            'std_img': std_img_tensor,  # torch.Size([1, 64, 64])
+            'std_coors': std_coors_tensor,  # torch.Size([20, 200, 4])
+            'same_style_img_list': torch.Tensor(img_list),  # torch.Size([img_num, C, 64, 64])
         }
         return output
 
@@ -130,22 +146,25 @@ class FontDataset(Dataset):
         return self.num_sample
 
     def collect_function(self, batch_data):
-        batch_char_imgs = torch.stack([item['char_img'] for item in batch_data])  # torch.Size([bs, 1, 64, 64])
+        batch_char_img = torch.stack([item['char_img'] for item in batch_data])  # torch.Size([bs, 1, 64, 64])
         batch_coordinates = torch.stack([item['coordinates'] for item in batch_data])  # torch.Size([bs, 20, 200, 4])
         batch_std_img = torch.stack([item['std_img'] for item in batch_data])  # torch.Size([bs, 1, 64, 64])
         batch_std_coors = torch.stack([item['std_coors'] for item in batch_data])  # torch.Size([bs, 20, 200, 4])
         batch_label_ids = torch.tensor([item['label_id'] for item in batch_data], dtype=torch.long)  # torch.Size([bs])
+        batch_same_style_img_list = torch.stack(
+            [item['same_style_img_list'] for item in batch_data])  # torch.Size([bs, num_img, C, 64, 64])
 
-        # print(batch_char_imgs.shape)
+        # print(batch_char_img.shape)
         # print(batch_coordinates.shape)
         # print(batch_label_ids.shape)
 
         return {
-            'char_img': batch_char_imgs,
+            'char_img': batch_char_img,
             'coordinates': batch_coordinates,
             'std_img': batch_std_img,
             'std_coors': batch_std_coors,
-            'label_ids': batch_label_ids
+            'label_ids': batch_label_ids,
+            'same_style_img_list': batch_same_style_img_list,
         }
 
 

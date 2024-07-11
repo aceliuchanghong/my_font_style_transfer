@@ -3,6 +3,12 @@ from torchvision.models.resnet import ResNet18_Weights
 from models.model import SeqtoEmb, EmbtoSeq
 from models.transformer import *
 from models.encoder import Content_TR
+from einops import rearrange, repeat
+import logging
+
+# 设置日志
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 class FontModel(nn.Module):
@@ -90,9 +96,9 @@ class FontModel(nn.Module):
         self.EmbtoSeq = EmbtoSeq(input_dim=d_model)
         self.add_position = PositionalEncoding(dim=d_model, dropout=0.1)
         # 参数重置 用于初始化模型的参数
-        self._reset_parameters()
+        self._init_parameters()
 
-    def _reset_parameters(self):
+    def _init_parameters(self):
         for p in self.parameters():
             """
             如果参数的维度大于 1，则使用 Xavier 均匀初始化方法来初始化参数 p。
@@ -104,26 +110,67 @@ class FontModel(nn.Module):
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p)
 
-    def forward(self, char_img_gt, std_coors):
-        # 特征提取
-        feat = self.feat_encoder(char_img_gt)  # 提取图像特征
-        feat = feat.flatten(2).permute(2, 0, 1)  # 重塑特征以适应Transformer的输入格式
-        # 编码图像特征
-        encoded_feat = self.base_encoder(feat)  # 基本编码器
-        # 字形编码
-        glyph_feat = self.glyph_encoder(encoded_feat)  # 字形编码器
+    def forward(self, same_style_img_list, std_coors, char_img_gt):
+        logger.info(
+            f"Input shapes: \n"
+            f"same_style_img_list={same_style_img_list.shape}\n"
+            f"std_coors={std_coors.shape}\n "
+            f"char_img_gt={char_img_gt.shape}"
+        )
+        batch_size, num_img, temp, h, w = same_style_img_list.shape
+        # [B,N,1,h,w]==>[B*N,1,h,w]
+        style_img_list = same_style_img_list.view(-1, temp, h, w)
+        logger.info(f"style_img_list shape: {style_img_list.shape}")
 
-        # 内容编码
-        content_feat = self.content_encoder(std_coors)  # 使用标准坐标进行内容编码
+        # 提取风格图像特征
+        feat = self.feat_encoder(style_img_list)
+        logger.info(f"feat shape after feat_encoder: {feat.shape}")
+        # [B*N,512,h*w]==>[h*w,B*N,512]
+        feat = feat.view(batch_size * num_img, 512, -1).permute(2, 0, 1)
+        logger.info(f"feat shape after view and permute: {feat.shape}")
+        feat = self.add_position(feat)
+        logger.info(f"feat shape after add_position: {feat.shape}")
+        feat = self.base_encoder(feat)
+        logger.info(f"feat shape after base_encoder: {feat.shape}")
+        feat = self.glyph_encoder(feat)
+        logger.info(f"feat shape after glyph_encoder: {feat.shape}")
 
-        # 字形解码
-        glyph_decoded = self.glyph_transformer_decoder(content_feat, glyph_feat)  # 字形Transformer解码器
+        # 重新排列特征以分离风格和内容
+        glyph_memory = rearrange(feat, 't (b p n) c -> t (p b) n c',
+                                 b=batch_size, p=2, n=num_img // 2)
+        logger.info(f"glyph_memory shape: {glyph_memory.shape}")
+        glyph_style = glyph_memory[:, :batch_size]
+        logger.info(f"glyph_style shape: {glyph_style.shape}")
+        glyph_style = rearrange(glyph_style, 't b n c -> (t n) b c')  # [h*w*B, anchor_num, 512]
+        logger.info(f"glyph_style shape after rearrange: {glyph_style.shape}")
 
-        # 通过MLP生成最终的字符输出
-        character_output = self.pro_mlp_character(glyph_decoded)  # 最终的字符输出
+        # 处理标准坐标
+        std_coors = rearrange(std_coors, 'b t n c -> b (t n) c')
+        logger.info(f"std_coors shape after rearrange: {std_coors.shape}")
+        seq_emb = self.SeqtoEmb(std_coors).permute(1, 0, 2)
+        logger.info(f"seq_emb shape: {seq_emb.shape}")
 
-        # 返回最终的字符输出
-        return character_output
+        # 提取目标字符图像的内容特征
+        char_emb = self.content_encoder(char_img_gt)
+        logger.info(f"char_emb shape: {char_emb.shape}")
+
+        # 准备解码器输入
+        tgt = torch.cat((char_emb, seq_emb), 0)
+        logger.info(f"tgt shape: {tgt.shape}")
+        T, N, C = tgt.shape
+        tgt_mask = generate_square_subsequent_mask(sz=(T)).to(tgt.device)
+        tgt = self.add_position(tgt)
+        logger.info(f"tgt shape after add_position: {tgt.shape}")
+
+        # 使用解码器生成预测序列
+        hs = self.glyph_transformer_decoder(tgt, glyph_style, tgt_mask=tgt_mask)
+        logger.info(f"hs shape: {hs.shape}")
+        h = hs.transpose(1, 2)[-1]
+        logger.info(f"h shape: {h.shape}")
+        pred_sequence = self.EmbtoSeq(h)
+        logger.info(f"pred_sequence shape: {pred_sequence.shape}")
+
+        return pred_sequence
 
     def inference(self, img_list):
         self.eval()  # 切换到评估模式
@@ -136,3 +183,33 @@ class FontModel(nn.Module):
                 pass
 
         return outputs
+
+
+def generate_square_subsequent_mask(sz: int) -> Tensor:
+    """
+    sz：表示掩码的大小，即掩码的行数和列数。
+    Tensor：返回一个 PyTorch 张量。
+
+    torch.triu(torch.ones(sz, sz))：生成一个大小为 (sz, sz) 的上三角矩阵，
+    其中上三角部分为 1，其余部分为 0。
+    (torch.triu(torch.ones(sz, sz)) == 1)：将上三角矩阵转换为布尔张量，
+    上三角部分为 True，其余部分为 False。
+    .transpose(0, 1)：将布尔张量转置，得到一个下三角矩阵，
+    其中下三角部分为 True，其余部分为 False。
+
+    .float()：将布尔张量转换为浮点数张量。
+    .masked_fill(mask == 0, float('-inf'))：将布尔张量中值为 False（即 0）的位置填充为 float('-inf')。
+    .masked_fill(mask == 1, float(0.0))：将布尔张量中值为 True（即 1）的位置填充为 float(0.0)。
+
+    i.e. [[0, inf, inf],
+         [0, 0, inf],
+         [0, 0, 0]].
+    """
+    mask = (torch.triu(torch.ones(sz, sz)) == 1).transpose(0, 1)
+    mask = (
+        mask
+        .float()
+        .masked_fill(mask == 0, float('-inf'))
+        .masked_fill(mask == 1, float(0.0))
+    )
+    return mask

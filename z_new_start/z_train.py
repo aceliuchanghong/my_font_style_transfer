@@ -9,6 +9,7 @@ import torch.nn as nn
 import sys
 import os
 
+from z_new_start.FontLoss import FontLoss
 from z_new_start.FontModel import FontModel
 from z_new_start.FontConfig import new_start_config
 from z_new_start.FontDataset import FontDataset
@@ -92,8 +93,7 @@ def main(opt):
             model.load_state_dict(state_dict)
         logger.info('load pretrained model from {}'.format(opt.pretrained_model))
 
-    # TODO 待写损失函数 风格迁移损失函数查下
-    criterion = nn.CrossEntropyLoss()
+    criterion = FontLoss(coordinate_weight=1.0, stroke_weight=0.5)
     optimizer = optim.Adam(model.parameters(), lr=train_conf['LEARNING_RATE'])
 
     logger.info(f"start training...")

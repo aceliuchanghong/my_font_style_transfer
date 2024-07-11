@@ -2,6 +2,7 @@ import torch
 import os
 import time
 import logging
+from tqdm import tqdm
 
 # 设置日志
 logging.basicConfig(level=logging.INFO)
@@ -20,56 +21,63 @@ class FontTrainer:
         self.train_conf = train_conf
         self.data_conf = data_conf
         self.best_loss = float('inf')
+        self.scaler = torch.cuda.amp.GradScaler()
 
     def train(self):
         num_epochs = self.train_conf['num_epochs']
         max_steps = self.train_conf['MAX_STEPS']
         logger.info(f"Start training epochs: {num_epochs}")
-
         start_time = time.time()
         step = 0
         for epoch in range(num_epochs):
             train_loader_iter = iter(self.train_loader)
             try:
+                pbar = tqdm(total=len(self.train_loader), desc=f"Epoch {epoch + 1}/{num_epochs}")
                 while True:
                     if max_steps and step >= max_steps:
                         logger.info(
-                            f"Reached max steps: {max_steps}. Stopping training.The epoch:{epoch}.Total time: {time.time() - start_time}")
+                            f"Reached max steps: {max_steps}. Stopping training. The epoch:{epoch}. Total time: {time.time() - start_time:.2f}s")
                         return
                     data = next(train_loader_iter)
                     self._train_iter(data, step)
                     self._save_checkpoint(step)
-                    self._valid_iter(step)
+                    val_loss = self._valid_iter(step)
+                    if val_loss < self.best_loss:
+                        self.best_loss = val_loss
+                        self._save_best_model(step, val_loss)
                     self._progress(step, num_epochs, start_time)
                     step += 1
+                    pbar.update(1)
             except StopIteration:
-                # 所有数据都被消费完，继续下一个 epoch
-                pass
+                pbar.close()
             except Exception as e:
                 logger.error(f"Error: {e}\ntrain_loader_iter_epoch failed:{epoch}")
                 return
-        logger.info(f"Training finished. Total time: {time.time() - start_time}")
+        logger.info(f"Training finished. Total time: {time.time() - start_time:.2f}s")
 
-    def _train_iter(self, data, epoch):
-        # 在没有使用数据的情况下调用的，但这是为了确保在每次训练迭代开始时，模型都处于正确的训练模式
-        # 执行一次训练迭代，包括前向传播、计算损失、反向传播和更新模型参数。
+    def _train_iter(self, data, step):
         self.model.train()
-
         iter_time = time.time()
-        char_img_gt = data['char_img'].to(self.device)  # torch.Size([8, 1, 64, 64])
-        coordinates_gt = data['coordinates'].to(self.device)  # torch.Size([8, 20, 200, 4])
-        std_img = data['std_img'].to(self.device)  # torch.Size([8, 1, 64, 64])
-        std_coors = data['std_coors'].to(self.device)  # torch.Size([8, 20, 200, 4])
-        label_ids = data['label_ids'].to(self.device)  # torch.Size([8])
+        char_img_gt = data['char_img'].to(self.device)
+        coordinates_gt = data['coordinates'].to(self.device)
+        std_img = data['std_img'].to(self.device)
+        std_coors = data['std_coors'].to(self.device)
+        label_ids = data['label_ids'].to(self.device)
+        same_style_img_list = data['same_style_img_list'].to(self.device)
 
-        predict = self.model(char_img_gt, std_coors)
-        loss = self.criterion(predict, coordinates_gt)
+        with torch.cuda.amp.autocast():
+            # torch.Size([bs, num, c, 64, 64])
+            # torch.Size([bs, 20, 200, 4])
+            # torch.Size([bs, c, 64, 64])
+            predict = self.model(same_style_img_list, std_coors, char_img_gt)
+            loss = self.criterion(predict, coordinates_gt)
 
         self.optimizer.zero_grad()
-        loss.backward()
-        self.optimizer.step()
+        self.scaler.scale(loss).backward()
+        self.scaler.step(self.optimizer)
+        self.scaler.update()
 
-        print(f"Epoch {epoch}, Iteration time: {time.time() - iter_time:.4f} seconds, Loss: {loss.item():.4f}")
+        logger.info(f"Step {step}, Iteration time: {time.time() - iter_time:.4f}s, Loss: {loss.item():.4f}")
 
     def _valid_iter(self, step):
         self.model.eval()
@@ -81,11 +89,13 @@ class FontTrainer:
                 std_img = data['std_img'].to(self.device)
                 std_coors = data['std_coors'].to(self.device)
                 label_ids = data['label_ids'].to(self.device)
-                predict = self.model(char_img_gt, std_coors)
+                same_style_img_list = data['same_style_img_list'].to(self.device)
+
+                predict = self.model(same_style_img_list, std_coors, char_img_gt)
                 loss = self.criterion(predict, coordinates_gt)
                 total_loss += loss.item()
         avg_loss = total_loss / len(self.valid_loader)
-        logger.info(f"Validation loss at epoch {step}: {avg_loss:.4f}")
+        logger.info(f"Validation loss at step {step}: {avg_loss:.4f}")
         return avg_loss
 
     def _save_checkpoint(self, step):
@@ -101,6 +111,12 @@ class FontTrainer:
             }, checkpoint_path)
             logger.info(f"Checkpoint saved at step {step} to {checkpoint_path}")
 
+            # 只保留最近的10个检查点
+            checkpoints = sorted(
+                [f for f in os.listdir(self.data_conf['save_model_dir']) if f.startswith('checkpoint_step_')])
+            for old_checkpoint in checkpoints[:-10]:
+                os.remove(os.path.join(self.data_conf['save_model_dir'], old_checkpoint))
+
     def _save_best_model(self, step, loss):
         best_model_path = os.path.join(self.data_conf['save_model_dir'], 'best_model.pt')
         model_state_dict = self.model.module.state_dict() if isinstance(self.model,
@@ -111,7 +127,7 @@ class FontTrainer:
             'optimizer_state_dict': self.optimizer.state_dict(),
             'loss': loss
         }, best_model_path)
-        logger.info(f"Best model saved at epoch {step} with validation loss {loss} to {best_model_path}")
+        logger.info(f"Best model saved at step {step} with validation loss {loss:.4f} to {best_model_path}")
 
     def _progress(self, step, num_epochs, start_time):
         elapsed_time = time.time() - start_time
@@ -120,4 +136,4 @@ class FontTrainer:
         eta = (elapsed_time / step) * (total_steps - step) if step > 0 else 0
         eta_minutes, eta_seconds = divmod(eta, 60)
         logger.info(
-            f"Step {step}/{total_steps}, ETA: {int(eta_minutes)} minutes {int(eta_seconds)} seconds, Elapsed time: {elapsed_time:.2f} seconds")
+            f"Step {step}/{total_steps}, ETA: {int(eta_minutes)}m {int(eta_seconds)}s, Elapsed time: {elapsed_time:.2f}s")
