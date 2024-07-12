@@ -26,12 +26,47 @@ class FontModel(nn.Module):
                  ):
         super(FontModel, self).__init__()
         self.train_conf = train_conf
+        self.feat_encoder = self._build_feature_encoder()
+        self.base_encoder = self._build_base_encoder(
+            d_model, num_head, dim_feedforward, dropout, activation, normalize_before, num_encoder_layers
+        )
+        self.glyph_encoder = self._build_glyph_encoder(
+            d_model, num_head, dim_feedforward, dropout, activation, normalize_before, num_glyph_encoder_layers
+        )
+        self.content_encoder = Content_TR(d_model=d_model, num_encoder_layers=num_encoder_layers)
+        self.glyph_transformer_decoder = self._build_glyph_decoder(
+            d_model, num_head, dim_feedforward, dropout, activation, num_gly_decoder_layers
+        )
 
+        self.pro_mlp_character = nn.Sequential(
+            nn.Linear(512, 4096),
+            nn.GELU(),
+            nn.Linear(4096, 256)
+        )
+        self.stroke_width_network = nn.Sequential(
+            nn.Linear(256, 128),
+            nn.ReLU(),
+            nn.Linear(128, 1)
+        )
+        self.color_network = nn.Sequential(
+            nn.Linear(256, 128),
+            nn.ReLU(),
+            nn.Linear(128, 3)
+        )
+        self.SeqtoEmb = Seq2Emb(output_dim=d_model)
+        self.EmbtoSeq = Emb2Seq(input_dim=d_model)
+        self.add_position = PositionalEncoding(dim=d_model, dropout=0.1)
+        # 自注意力机制
+        self.self_attention = nn.MultiheadAttention(d_model, num_head)
+        # 参数重置 用于初始化模型的参数
+        self._init_parameters()
+
+    def _build_feature_encoder(self):
         # 图像的特征提取卷积层
         # 此处使用一个卷积层和一个预训练的 ResNet-18 模型的特征提取器
         # *() 将列表中的元素作为多个参数传递给 nn.Sequential，而不是将整个列表作为一个参数
         # Downloading: "https://download.pytorch.org/models/resnet18-f37072fd.pth" to C:/Users/liuch/.cache/torch/hub/checkpoints/resnet18-f37072fd.pth
-        self.feat_encoder = nn.Sequential(*(  # 一个输入通道，输出64个通道。卷积核大小为7，步长为2，填充为3。bias=False不使用偏置项
+        return nn.Sequential(*(  # 一个输入通道，输出64个通道。卷积核大小为7，步长为2，填充为3。bias=False不使用偏置项
                 [nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)]
                 +
                 # 获取了 ResNet-18 模型的子模块列表，然后去掉了列表的第一个和最后两个模块。
@@ -39,65 +74,28 @@ class FontModel(nn.Module):
                 list(models.resnet18(weights=ResNet18_Weights.IMAGENET1K_V1).children())[1:-2]
         ))
 
-        # Transformer 编码器
+    # Transformer 编码器
+    def _build_base_encoder(self, d_model, num_head, dim_feedforward, dropout, activation, normalize_before,
+                            num_encoder_layers
+                            ):
         encoder_layer = TransformerEncoderLayer(
             d_model, num_head, dim_feedforward, dropout, activation, normalize_before
         )
-        self.base_encoder = TransformerEncoder(encoder_layer, num_encoder_layers)
+        return TransformerEncoder(encoder_layer, num_encoder_layers)
 
-        # 风格特征编码器
+    def _build_glyph_encoder(self, d_model, num_head, dim_feedforward, dropout, activation, normalize_before,
+                             num_glyph_encoder_layers):
+        encoder_layer = TransformerEncoderLayer(
+            d_model, num_head, dim_feedforward, dropout, activation, normalize_before
+        )
         glyph_norm = nn.LayerNorm(d_model) if normalize_before else None
-        self.glyph_encoder = TransformerEncoder(
-            encoder_layer, num_glyph_encoder_layers, glyph_norm
-        )
+        return TransformerEncoder(encoder_layer, num_glyph_encoder_layers, glyph_norm)
 
-        # 内容编码器 用于对输入的内容进行编码，以提取内容信息。
-        self.content_encoder = Content_TR(
-            d_model=d_model, num_encoder_layers=num_encoder_layers
-        )
-
-        # 风格特征解码器
+    def _build_glyph_decoder(self, d_model, num_head, dim_feedforward, dropout, activation, num_gly_decoder_layers):
         glyph_decoder_layers = TransformerDecoderLayer(
             d_model, num_head, dim_feedforward, dropout, activation
         )
-        self.glyph_transformer_decoder = TransformerDecoder(
-            glyph_decoder_layers, num_gly_decoder_layers
-        )
-
-        # 多层感知器（MLP，Multi-Layer Perceptron)
-        # Gaussian Error Linear Unit
-        self.pro_mlp_character = nn.Sequential(
-            nn.Linear(512, 4096),
-            nn.GELU(),
-            nn.Linear(4096, 256)
-        )
-
-        """
-        添加笔画宽度和颜色装饰网络
-        width = self.stroke_width_network(features)
-        color = self.color_network(features)
-        由于 pro_mlp_writer 和 pro_mlp_character 生成的特征是 256 维度的，
-        因此 stroke_width_network 和 color_network 接收 256 维度的输入。
-        如果输入维度不同，需要根据实际情况进行调整。
-        """
-        self.stroke_width_network = nn.Sequential(
-            nn.Linear(256, 128),
-            nn.ReLU(),
-            nn.Linear(128, 1)  # 输出一个值表示笔画宽度
-        )
-        self.color_network = nn.Sequential(
-            nn.Linear(256, 128),
-            nn.ReLU(),
-            nn.Linear(128, 3)  # 输出三个值表示颜色的RGB通道
-        )
-
-        # 序列到emb (SeqtoEmb) 和 emb到序列 (EmbtoSeq)
-        # 这两个模块用于处理序列数据和嵌入数据之间的转换。
-        self.SeqtoEmb = Seq2Emb(output_dim=d_model)
-        self.EmbtoSeq = Emb2Seq(input_dim=d_model)
-        self.add_position = PositionalEncoding(dim=d_model, dropout=0.1)
-        # 参数重置 用于初始化模型的参数
-        self._init_parameters()
+        return TransformerDecoder(glyph_decoder_layers, num_gly_decoder_layers)
 
     def _init_parameters(self):
         for p in self.parameters():
@@ -146,6 +144,8 @@ class FontModel(nn.Module):
         # [h/32*w/32,B,N/2,512] ==> [h/32*w/32*N/2,B,512]
         glyph_style = rearrange(glyph_style, 't b n c -> (t n) b c')
         logger.info(f"glyph_style shape after rearrange: {glyph_style.shape}")
+        glyph_style, _ = self.self_attention(glyph_style, glyph_style, glyph_style)
+        logger.info(f"glyph_style shape after attention: {glyph_style.shape}")
 
         # 处理标准坐标
         # [8, 20, 200, 4]=[B,20,200,4] ==> [B,4000,4]
@@ -179,32 +179,26 @@ class FontModel(nn.Module):
         pred_sequence = self.EmbtoSeq(h)
         logger.info(f"pred_sequence shape: {pred_sequence.shape}")
 
-        B, T, _ = std_coors.shape # [B,4000,4]
+        B, T, _ = std_coors.shape  # [B,4000,4]
 
         pred_sequence = pred_sequence[:, :T, :].view(B, self.train_conf['max_stroke'],
                                                      self.train_conf['max_per_stroke_point'], -1)
         logger.info(f"pred_sequence shape after view: {pred_sequence.shape}")
         return pred_sequence
 
+    @torch.jit.export
     def inference(self, img_list):
-        self.eval()  # 切换到评估模式
+        self.eval()
         device = next(self.parameters()).device
         outputs = []
-
-        with torch.no_grad():  # 禁用梯度计算以提高推理速度并节省内存
+        with torch.no_grad():
             for img in img_list:
-                img = img.unsqueeze(0).to(device)  # 增加批次维度并移动到设备上
-
-                # 假设 std_coors 和 char_img_gt 是推理过程中需要的其他输入
-                std_coors = torch.zeros((1, self.max_stroke, self.max_per_stroke_point, 4)).to(device)
-                char_img_gt = img  # 在推理过程中，char_img_gt 可以是输入图像本身
-
-                # 调用模型的 forward 方法进行推理
+                img = img.unsqueeze(0).to(device)
+                std_coors = torch.zeros(
+                    (1, self.train_conf['max_stroke'], self.train_conf['max_per_stroke_point'], 4)).to(device)
+                char_img_gt = img
                 pred_sequence = self.forward(img, std_coors, char_img_gt)
-
-                # 将预测结果添加到输出列表中
-                outputs.append(pred_sequence.cpu().numpy())  # 转换为 numpy 数组以便后续处理
-
+                outputs.append(pred_sequence.cpu().numpy())
         return outputs
 
 
