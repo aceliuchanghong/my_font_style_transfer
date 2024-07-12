@@ -2,16 +2,13 @@ import pickle
 import os
 import fontforge
 import json
-import concurrent.futures
 import logging
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-output_dir = 'font_pics'
+output_dir = r'D:\aProject\py\my_font_style_transfer\z_new_start\ABtest\files\AB_pics'
 test_ttf = r'D:\aProject\py\my_font_style_transfer\z_new_start\generate_utils\LXGWWenKaiGB-Light.ttf'
 char_json_path = r'D:\aProject\py\my_font_style_transfer\tf_test\txt9169.json'
-new_char_dic = r'D:\aProject\py\my_font_style_transfer\z_new_start\generate_utils\new_character_dict.pkl'
-char_dict = pickle.load(open(new_char_dic, 'rb'))
 char_dict = ['A', 'B', '刘', '一', '以', '已', '亦', '伊', '比', '的', '地', '分', '非', '火', '炬', '电', '子', '福',
              '建', '：', '（', '9']
 
@@ -48,7 +45,7 @@ def draw_glyph(font_path, char_dict):
 
 if __name__ == '__main__':
     """
-    ffpython D:\\aProject\\py\\my_font_style_transfer\\z_new_start\\generate_utils\\gen_imgs_from_ttf.py
+    ffpython D:\\aProject\\py\\my_font_style_transfer\\z_new_start\\ABtest\\2.5_gen_std_ABimg.py
     """
     try:
         draw_glyph(test_ttf, char_dict)

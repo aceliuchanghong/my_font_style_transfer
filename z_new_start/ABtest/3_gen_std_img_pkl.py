@@ -1,7 +1,7 @@
 from utils.judge_font import get_files
 from utils.util import write_pkl
 
-std_char_path = r'D:\aProject\py\SDT\z_new_start\ABtest\files\AB_pics'
+std_char_path = r'D:\aProject\py\my_font_style_transfer\z_new_start\ABtest\files\AB_pics'
 get_suffix = '.png'
 
 if __name__ == '__main__':
@@ -14,4 +14,4 @@ if __name__ == '__main__':
     save_pkl_file_path = '.'
     save_pkl_file_name = 'files/new_chinese_content.pkl'
     pics_path = std_char_path
-    write_pkl(save_pkl_file_path, save_pkl_file_name, imgs_file_list, 2)
+    write_pkl(save_pkl_file_path, save_pkl_file_name, imgs_file_list, 12)

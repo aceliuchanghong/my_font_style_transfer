@@ -14,7 +14,8 @@ def get_files(path, suffix):
 save_dir_up = '/mnt/data/llch/Chinese-Fonts-Dataset/all_test/AB_pics'
 pics_path = '/mnt/data/llch/Chinese-Fonts-Dataset/lch_pics'
 png_dirs = os.listdir(pics_path)
-char_list = ['A', 'B', '刘']
+char_list = ['A', 'B', '刘', '一', '以', '已', '亦', '伊', '比', '的', '地', '分', '非', '火', '炬', '电', '子', '福',
+             '建', '：', '（', '9']
 
 if __name__ == '__main__':
     for png_dir in png_dirs:
@@ -27,4 +28,3 @@ if __name__ == '__main__':
             pic_name = os.path.basename(pic).split('.')[0]
             if pic_name in char_list:
                 shutil.copy(pic, os.path.join(out_dir, pic_name + ".png"))
-

@@ -1,8 +1,9 @@
 import pickle
 import argparse
 
-chinese_punctuations = [
-    '刘',
+punctuations = [
+    '刘', '一', '以', '已', '亦', '伊', '比', '的', '地', '分', '非', '火', '炬', '电', '子', '福',
+    '建', '：', '（', '9'
 ]
 
 english_str = ['A', 'B', ]
@@ -14,14 +15,14 @@ def main(opt):
     i = 0
     temp_char = []
     if not opt.not_all:
-        all_char = chinese_punctuations + english_str
+        all_char = punctuations + english_str
     while i < opt.nums and i < len(char_dict):
         temp_char.append(char_dict[i])
         i += 1
     all_char.extend(temp_char)
     if len(all_char) < 90:
         print(all_char)
-    pickle.dump(all_char, open('../generate_utils/new_character_dict.pkl', 'wb'))
+    pickle.dump(all_char, open('files/new_character_dict.pkl', 'wb'))
     print("suc generate:", len(all_char))
 
 
