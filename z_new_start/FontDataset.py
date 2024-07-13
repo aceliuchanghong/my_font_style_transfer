@@ -72,17 +72,21 @@ class FontDataset(Dataset):
                 ]
                 单个笔画坐标点太多了也不要了
                 """
-                max_per_stroke_point = max(len(sublist) for sublist in font_coors_list[char])
-                if (char in font_coors_list and
-                        len(font_coors_list[char]) <= self.max_stroke and
-                        max_per_stroke_point <= self.max_per_stroke_point):
-                    self.font_data.append(
-                        (i, font_name, pic['label'], pic['img'], font_coors_list[char])
-                    )
-                    # print('文字:', pic['label'],
-                    #       '笔画数量:', str(len(font_coors_list[char])),
-                    #       '一个笔画最多坐标点数量:', str(max_per_stroke_point))
-
+                try:
+                    max_per_stroke_point = max(len(sublist) for sublist in font_coors_list[char])
+                    if (char in font_coors_list and len(font_coors_list[char]) <= self.max_stroke and
+                            max_per_stroke_point <= self.max_per_stroke_point):
+                        self.font_data.append(
+                            (i, font_name, pic['label'], pic['img'], font_coors_list[char])
+                        )
+                        # print('文字:', pic['label'],
+                        #       '笔画数量:', str(len(font_coors_list[char])),
+                        #       '一个笔画最多坐标点数量:', str(max_per_stroke_point))
+                except Exception as e:
+                    # 主要是一些中文符号某些字体没有
+                    # print(font_name, char)
+                    # print(e)
+                    pass
         train_size = int(len(self.font_data) * train_percent)
         if is_train:
             self.font_data = self.font_data[:train_size]
@@ -93,7 +97,12 @@ class FontDataset(Dataset):
 
     def __getitem__(self, idx):
         font_nums, font_name, label, char_img, coors = self.font_data[idx]
-        label_id = self.character_std.index(label)
+        try:
+            label_id = self.character_std.index(label)
+        except Exception as e:
+            print(label)
+            print(self.character_std)
+            print(e)
         char_img = char_img / 255.0
         # 添加通道维度 1 * 64 * 64
         char_img_tensor = torch.tensor(char_img, dtype=torch.float32).unsqueeze(0)
@@ -108,15 +117,20 @@ class FontDataset(Dataset):
         # 1.每个字符最多包含的笔画数
         # 2.每个笔画最多包含的点数
         padded_coors = torch.zeros((self.max_stroke, self.max_per_stroke_point, 4), dtype=torch.float32)
-        for i, stroke in enumerate(coors):
-            if i >= self.max_stroke:
-                break
-            for j, point in enumerate(stroke):
-                if j >= self.max_per_stroke_point:
+        try:
+            for i, stroke in enumerate(coors):
+                if i >= self.max_stroke:
                     break
-                padded_coors[i, j] = torch.tensor(point, dtype=torch.float32)
-        # print(padded_coors)
-        # print(padded_coors.shape)
+                for j, point in enumerate(stroke):
+                    if j >= self.max_per_stroke_point:
+                        break
+                    padded_coors[i, j] = torch.tensor(point, dtype=torch.float32)
+            # print(padded_coors)
+            # print(padded_coors.shape)
+        except Exception as e:
+            print(font_name, label)
+            print(coors)
+            print(e)
 
         std_coors_tensor = torch.zeros((self.max_stroke, self.max_per_stroke_point, 4), dtype=torch.float32)
         for i, stroke in enumerate(self.coors_std[label]):

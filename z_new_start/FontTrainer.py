@@ -81,6 +81,9 @@ class FontTrainer:
 
         logger.info(f"Step {step}, Iteration time: {time.time() - iter_time:.4f}s, Loss: {loss.item():.4f}")
 
+        del data, predict, loss
+        torch.cuda.empty_cache()
+
     def _valid_iter(self, step):
         self.model.eval()
         total_loss = 0

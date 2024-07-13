@@ -45,6 +45,7 @@ def get_character_stroke_coordinates2(font_path, characters, output_dir='.'):
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     pickle.dump(coordinates, open(output_dir + "/" + font_name + '.pkl', 'wb'))
+    print(output_dir + "/" + font_name + '.pkl')
 
     return coordinates
 
@@ -68,9 +69,9 @@ def get_ttf_files(directory):
 
 if __name__ == '__main__':
     """
-    ffpython D:\\aProject\\py\\SDT\\tf_test\\test_ttf2coor.py
+    ffpython D:\\aProject\\py\\my_font_style_transfer\\tf_test\\test_ttf2coor.py
     """
-    pkl_path = r'D:\aProject\py\SDT\z_new_start\generate_utils\new_character_dict.pkl'
+    pkl_path = r'D:\aProject\py\my_font_style_transfer\z_new_start\ABtest\files\new_character_dict.pkl'
     char_dict = pickle.load(open(pkl_path, 'rb'))
     print(char_dict)
 
@@ -79,7 +80,7 @@ if __name__ == '__main__':
     # ttf_dir = r'D:\download\Chinese-Fonts-Dataset-main\ttf格式\衬线体\仿宋'
     # ttf_list = get_ttf_files(ttf_dir)
     ttf_list = [
-        r'D:\aProject\py\SDT\z_new_start\generate_utils\LXGWWenKaiGB-Light.ttf'
+        r'D:\aProject\py\my_font_style_transfer\z_new_start\generate_utils\LXGWWenKaiGB-Light.ttf'
     ]
 
     with concurrent.futures.ThreadPoolExecutor() as executor:

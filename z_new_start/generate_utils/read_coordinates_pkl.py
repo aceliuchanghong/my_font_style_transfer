@@ -79,6 +79,7 @@ if __name__ == '__main__':
     cd z_new_start/generate_utils
     python read_coordinates_pkl.py
     python read_coordinates_pkl.py --pkl ../ABtest/files/AB_coors/AliHYAiHei.pkl
+    python read_coordinates_pkl.py --pkl ../ABtest/files/LXGWWenKaiGB-Light.pkl
     """
     parser = argparse.ArgumentParser()
     parser.add_argument('--out_path', default='coors_test_path', help='输出图片目录')

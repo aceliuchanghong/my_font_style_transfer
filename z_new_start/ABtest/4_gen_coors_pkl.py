@@ -68,11 +68,15 @@ def get_ttf_files(directory):
 
 if __name__ == '__main__':
 
-    # nohup /usr/bin/python3 4_gen_coors_pkl.py > 4coor.log &
+    # ffpython D:\aProject\py\my_font_style_transfer\z_new_start\ABtest\4_gen_coors_pkl.py
+    ttf_dir = r'D:\aProject\py\my_font_style_transfer\z_new_start\generate_utils'
+    pkl_path = r'D:\aProject\py\my_font_style_transfer\z_new_start\ABtest\files\new_character_dict.pkl'
+    output_dir = r'D:\aProject\py\my_font_style_transfer\z_new_start\ABtest\files\AB_pics'
 
-    pkl_path = '/mnt/data/llch/Chinese-Fonts-Dataset/all_test/new_character_dict.pkl'
-    output_dir = 'AB_coors'
-    ttf_dir = '/mnt/data/llch/Chinese-Fonts-Dataset/z_ttf'
+    # nohup /usr/bin/python3 4_gen_coors_pkl.py > 4coor.log &
+    # pkl_path = '/mnt/data/llch/Chinese-Fonts-Dataset/all_test/new_character_dict.pkl'
+    # ttf_dir = '/mnt/data/llch/Chinese-Fonts-Dataset/z_ttf'
+    # output_dir = 'AB_coors'
 
     char_dict = pickle.load(open(pkl_path, 'rb'))
     ttf_list = get_ttf_files(ttf_dir)

@@ -5,9 +5,12 @@ import random
 import numpy as np
 import torch
 import torch.optim as optim
-import torch.nn as nn
 import sys
 import os
+
+# 获取项目根目录的绝对路径
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, project_root)
 
 from z_new_start.FontLoss import FontLoss
 from z_new_start.FontModel import FontModel
@@ -15,9 +18,7 @@ from z_new_start.FontConfig import new_start_config
 from z_new_start.FontDataset import FontDataset
 from z_new_start.FontTrainer import FontTrainer
 
-# 获取项目根目录的绝对路径
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-sys.path.insert(0, project_root)
+
 # 设置日志
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -114,6 +115,7 @@ def main(opt):
 if __name__ == '__main__':
     """
     python z_new_start/z_train.py
+    python z_new_start/z_train.py --dev
     python z_new_start/z_train.py --pretrained_model xx/xx.pth --dev
     """
     parser = argparse.ArgumentParser()
