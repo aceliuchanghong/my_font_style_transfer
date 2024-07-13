@@ -144,6 +144,7 @@ class FontModel(nn.Module):
         # [h/32*w/32,B,N/2,512] ==> [h/32*w/32*N/2,B,512]
         glyph_style = rearrange(glyph_style, 't b n c -> (t n) b c')
         logger.debug(f"glyph_style shape after rearrange: {glyph_style.shape}")
+        glyph_style = self.add_position(glyph_style)
         glyph_style, _ = self.self_attention(glyph_style, glyph_style, glyph_style)
         logger.debug(f"glyph_style shape after attention: {glyph_style.shape}")
 
@@ -165,7 +166,7 @@ class FontModel(nn.Module):
         tgt = torch.cat((char_emb, seq_emb), 0)
         logger.debug(f"tgt shape: {tgt.shape}")
         T, N, C = tgt.shape
-        tgt_mask = generate_square_subsequent_mask(sz=(T)).to(tgt.device)
+        tgt_mask = generate_square_subsequent_mask(T).to(tgt.device)
         tgt = self.add_position(tgt)
         logger.debug(f"tgt shape after add_position: {tgt.shape}")
 
