@@ -22,6 +22,7 @@ class FontTrainer:
         self.data_conf = data_conf
         self.best_loss = float('inf')
         self.scaler = torch.cuda.amp.GradScaler()
+        self.accumulation_steps = 16  # 累积梯度的步数
 
     def train(self):
         num_epochs = self.train_conf['num_epochs']
@@ -58,12 +59,14 @@ class FontTrainer:
     def _train_iter(self, data, step):
         self.model.train()
         iter_time = time.time()
-        char_img_gt = data['char_img'].to(self.device)
-        coordinates_gt = data['coordinates'].to(self.device)
-        std_img = data['std_img'].to(self.device)
-        std_coors = data['std_coors'].to(self.device)
-        label_ids = data['label_ids'].to(self.device)
-        same_style_img_list = data['same_style_img_list'].to(self.device)
+        # 仅在需要时将数据放入 GPU
+        char_img_gt = data['char_img'].to(self.device, non_blocking=True)
+        coordinates_gt = data['coordinates'].to(self.device, non_blocking=True)
+        std_coors = data['std_coors'].to(self.device, non_blocking=True)
+        same_style_img_list = data['same_style_img_list'].to(self.device, non_blocking=True)
+        # 先不放不需要的
+        # std_img = data['std_img'].to(self.device)
+        # label_ids = data['label_ids'].to(self.device)
 
         # PyTorch 提供的自动混合精度训练
         with torch.cuda.amp.autocast():
@@ -73,11 +76,14 @@ class FontTrainer:
             predict = self.model(same_style_img_list, std_coors, char_img_gt)
             assert predict.shape == coordinates_gt.shape, f"Shape mismatch: predict {predict.shape}, coordinates_gt {coordinates_gt.shape}"
             loss = self.criterion(predict, coordinates_gt)
+            loss = loss / self.accumulation_steps
 
         self.optimizer.zero_grad()
         self.scaler.scale(loss).backward()
-        self.scaler.step(self.optimizer)
-        self.scaler.update()
+        # 增加梯度累加
+        if (step + 1) % self.accumulation_steps == 0:
+            self.scaler.step(self.optimizer)
+            self.scaler.update()
 
         logger.info(f"Step {step}, Iteration time: {time.time() - iter_time:.4f}s, Loss: {loss.item():.4f}")
 
@@ -89,12 +95,13 @@ class FontTrainer:
         total_loss = 0
         with torch.no_grad():
             for data in self.valid_loader:
-                char_img_gt = data['char_img'].to(self.device)
-                coordinates_gt = data['coordinates'].to(self.device)
-                std_img = data['std_img'].to(self.device)
-                std_coors = data['std_coors'].to(self.device)
-                label_ids = data['label_ids'].to(self.device)
-                same_style_img_list = data['same_style_img_list'].to(self.device)
+                char_img_gt = data['char_img'].to(self.device, non_blocking=True)
+                coordinates_gt = data['coordinates'].to(self.device, non_blocking=True)
+                std_coors = data['std_coors'].to(self.device, non_blocking=True)
+                same_style_img_list = data['same_style_img_list'].to(self.device, non_blocking=True)
+
+                # std_img = data['std_img'].to(self.device)
+                # label_ids = data['label_ids'].to(self.device)
 
                 with torch.cuda.amp.autocast():  # 使用自动混合精度
                     predict = self.model(same_style_img_list, std_coors, char_img_gt)

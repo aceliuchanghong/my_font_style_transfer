@@ -2423,6 +2423,11 @@ class Emb2Seq(nn.Module):
 
 ---
 
+在上述train训练的时候,其中PER_BATCH等于64时候报错 Error: CUDA out of memory.
+只有当PER_BATCH等于4才不报错.
+是不是将数据放到cuda上的代码，将中间过程中有cuda（）的地方，改为在cpu（）上跑,才能可以呢?理解不了
+
+
 ---
  
 
