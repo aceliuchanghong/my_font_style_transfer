@@ -96,9 +96,10 @@ class FontTrainer:
                 label_ids = data['label_ids'].to(self.device)
                 same_style_img_list = data['same_style_img_list'].to(self.device)
 
-                predict = self.model(same_style_img_list, std_coors, char_img_gt)
-                loss = self.criterion(predict, coordinates_gt)
-                total_loss += loss.item()
+                with torch.cuda.amp.autocast():  # 使用自动混合精度
+                    predict = self.model(same_style_img_list, std_coors, char_img_gt)
+                    loss = self.criterion(predict, coordinates_gt)
+                    total_loss += loss.item()
         avg_loss = total_loss / len(self.valid_loader)
         logger.info(f"Validation loss at step {step}: {avg_loss:.4f}")
         return avg_loss

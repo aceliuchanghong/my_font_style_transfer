@@ -110,7 +110,7 @@ class FontModel(nn.Module):
                 nn.init.xavier_uniform_(p)
 
     def forward(self, same_style_img_list, std_coors, char_img_gt):
-        logger.info(
+        logger.debug(
             f"Input shapes: \n"
             f"same_style_img_list={same_style_img_list.shape}\n"
             f"std_coors={std_coors.shape}\n"
@@ -120,15 +120,15 @@ class FontModel(nn.Module):
         batch_size, num_img, temp, h, w = same_style_img_list.shape
         # [B,N,C,H,W]==>[B*N,C,h,w]
         style_img_list = same_style_img_list.view(-1, temp, h, w)
-        logger.info(f"style_img_list shape: {style_img_list.shape}")
+        logger.debug(f"style_img_list shape: {style_img_list.shape}")
 
         # 提取风格图像特征
         # [B*N,C,h,w]==>[B*N, 64, h/2, w/2]==> [B*N, 512, h/32, w/32]
         feat = self.feat_encoder(style_img_list)
-        logger.info(f"feat shape after feat_encoder: {feat.shape}")
+        logger.debug(f"feat shape after feat_encoder: {feat.shape}")
         # [B*N, 512, h/32, w/32]==>[B*N, 512, h/32 * w/32] ==> [h/32*w/32,B*N,512] = [4, 16, 512]
         feat = feat.view(batch_size * num_img, 512, -1).permute(2, 0, 1)
-        logger.info(f"feat shape after view and permute: {feat.shape}")
+        logger.debug(f"feat shape after view and permute: {feat.shape}")
         feat = self.add_position(feat)
         feat = self.base_encoder(feat)
         feat = self.glyph_encoder(feat)
@@ -137,53 +137,53 @@ class FontModel(nn.Module):
         # [h/32*w/32,B*N,512] ==> [h/32*w/32,2*B,N/2,512]
         glyph_memory = rearrange(feat, 't (b p n) c -> t (p b) n c',
                                  b=batch_size, p=2, n=num_img // 2)
-        logger.info(f"glyph_memory shape: {glyph_memory.shape}")
+        logger.debug(f"glyph_memory shape: {glyph_memory.shape}")
         # [h/32*w/32,2*B,N/2,512] ==> [h/32*w/32,B,N/2,512]
         glyph_style = glyph_memory[:, :batch_size]
-        logger.info(f"glyph_style shape: {glyph_style.shape}")
+        logger.debug(f"glyph_style shape: {glyph_style.shape}")
         # [h/32*w/32,B,N/2,512] ==> [h/32*w/32*N/2,B,512]
         glyph_style = rearrange(glyph_style, 't b n c -> (t n) b c')
-        logger.info(f"glyph_style shape after rearrange: {glyph_style.shape}")
+        logger.debug(f"glyph_style shape after rearrange: {glyph_style.shape}")
         glyph_style, _ = self.self_attention(glyph_style, glyph_style, glyph_style)
-        logger.info(f"glyph_style shape after attention: {glyph_style.shape}")
+        logger.debug(f"glyph_style shape after attention: {glyph_style.shape}")
 
         # 处理标准坐标
         # [8, 20, 200, 4]=[B,20,200,4] ==> [B,4000,4]
         std_coors = rearrange(std_coors, 'b t n c -> b (t n) c')
-        logger.info(f"std_coors shape after rearrange: {std_coors.shape}")
+        logger.debug(f"std_coors shape after rearrange: {std_coors.shape}")
         # [B,4000,4]==>[B,4000,512]==>[4000,B,512]
         seq_emb = self.SeqtoEmb(std_coors).permute(1, 0, 2)
-        logger.info(f"seq_emb shape: {seq_emb.shape}")
+        logger.debug(f"seq_emb shape: {seq_emb.shape}")
 
         # 提取目标字符图像的内容特征
         # [bs, 1, 64, 64] = [B,C,H,W]==> [B,512,H/32,W/32]==>rearrange(x,'n c h w -> (h w) n c')=[4, B, 512]
         char_emb = self.content_encoder(char_img_gt)
-        logger.info(f"char_emb shape: {char_emb.shape}")
+        logger.debug(f"char_emb shape: {char_emb.shape}")
 
         # 准备解码器输入
         # [4000,B,512] + [4, B, 512] = [4004, B, 512]
         tgt = torch.cat((char_emb, seq_emb), 0)
-        logger.info(f"tgt shape: {tgt.shape}")
+        logger.debug(f"tgt shape: {tgt.shape}")
         T, N, C = tgt.shape
         tgt_mask = generate_square_subsequent_mask(sz=(T)).to(tgt.device)
         tgt = self.add_position(tgt)
-        logger.info(f"tgt shape after add_position: {tgt.shape}")
+        logger.debug(f"tgt shape after add_position: {tgt.shape}")
 
         # 使用解码器生成预测序列
         # [1, 4004, 8, 512]
         hs = self.glyph_transformer_decoder(tgt, glyph_style, tgt_mask=tgt_mask)
-        logger.info(f"hs shape: {hs.shape}")
+        logger.debug(f"hs shape: {hs.shape}")
         # [4004, 8, 512]
         h = hs.transpose(1, 2)[-1]
-        logger.info(f"h shape: {h.shape}")
+        logger.debug(f"h shape: {h.shape}")
         pred_sequence = self.EmbtoSeq(h)
-        logger.info(f"pred_sequence shape: {pred_sequence.shape}")
+        logger.debug(f"pred_sequence shape: {pred_sequence.shape}")
 
         B, T, _ = std_coors.shape  # [B,4000,4]
 
         pred_sequence = pred_sequence[:, :T, :].view(B, self.train_conf['max_stroke'],
                                                      self.train_conf['max_per_stroke_point'], -1)
-        logger.info(f"pred_sequence shape after view: {pred_sequence.shape}")
+        logger.debug(f"pred_sequence shape after view: {pred_sequence.shape}")
         return pred_sequence
 
     @torch.jit.export

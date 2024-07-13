@@ -44,6 +44,13 @@ def main(opt):
         data_conf = conf['test']
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
+    # 禁用 cuDNN autotuner
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
+
+    # 强制禁用 cuDNN 后端
+    torch.backends.cudnn.enabled = False
+
     fix_seed(train_conf['seed'])
     logger.info(f"seed: {train_conf['seed']}")
 
