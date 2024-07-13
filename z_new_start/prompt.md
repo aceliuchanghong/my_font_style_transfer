@@ -2430,9 +2430,284 @@ class Emb2Seq(nn.Module):
 
 ---
  
+```
+class FontTrainer:
+    def __init__(self,
+                 model, train_loader, valid_loader, criterion, optimizer, device, train_conf, data_conf):
+        self.model = model
+        self.train_loader = train_loader
+        self.valid_loader = valid_loader
+        self.criterion = criterion
+        self.optimizer = optimizer
+        self.device = device
+        self.train_conf = train_conf
+        self.data_conf = data_conf
+        self.best_loss = float('inf')
+        self.scaler = torch.cuda.amp.GradScaler()
+        self.accumulation_steps = 16
+    def train(self):
+        num_epochs = self.train_conf['num_epochs']
+        max_steps = self.train_conf['MAX_STEPS']
+        logger.info(f"Start training epochs: {num_epochs}")
+        start_time = time.time()
+        step = 0
+        for epoch in range(num_epochs):
+            train_loader_iter = iter(self.train_loader)
+            try:
+                pbar = tqdm(total=len(self.train_loader), desc=f"Epoch {epoch + 1}/{num_epochs}")
+                while True:
+                    if max_steps and step >= max_steps:
+                        logger.info(
+                            f"Reached max steps: {max_steps}. Stopping training. The epoch:{epoch}. Total time: {time.time() - start_time:.2f}s")
+                        return
+                    data = next(train_loader_iter)
+                    self._train_iter(data, step)
+                    self._save_checkpoint(step)
+                    val_loss = self._valid_iter(step)
+                    if val_loss < self.best_loss:
+                        self.best_loss = val_loss
+                        self._save_best_model(step, val_loss)
+                    self._progress(step, num_epochs, start_time)
+                    step += 1
+                    pbar.update(1)
+            except StopIteration:
+                pbar.close()
+            except Exception as e:
+                logger.error(f"Error: {e}\ntrain_loader_iter_epoch failed:{epoch}")
+                return
+        logger.info(f"Training finished. Total time: {time.time() - start_time:.2f}s")
+    def _train_iter(self, data, step):
+        self.model.train()
+        iter_time = time.time()
+        char_img_gt = data['char_img'].to(self.device, non_blocking=True)
+        coordinates_gt = data['coordinates'].to(self.device, non_blocking=True)
+        std_coors = data['std_coors'].to(self.device, non_blocking=True)
+        same_style_img_list = data['same_style_img_list'].to(self.device, non_blocking=True)
+        with torch.cuda.amp.autocast():
+            predict = self.model(same_style_img_list, std_coors, char_img_gt)
+            assert predict.shape == coordinates_gt.shape, f"Shape mismatch: predict {predict.shape}, coordinates_gt {coordinates_gt.shape}"
+            loss = self.criterion(predict, coordinates_gt)
+            loss = loss / self.accumulation_steps
+        self.optimizer.zero_grad()
+        self.scaler.scale(loss).backward()
+        if (step + 1) % self.accumulation_steps == 0:
+            self.scaler.step(self.optimizer)
+            self.scaler.update()
+        logger.info(f"Step {step}, Iteration time: {time.time() - iter_time:.4f}s, Loss: {loss.item():.4f}")
+        del data, predict, loss
+        torch.cuda.empty_cache()
+    def _valid_iter(self, step):
+        self.model.eval()
+        total_loss = 0
+        with torch.no_grad():
+            for data in self.valid_loader:
+                char_img_gt = data['char_img'].to(self.device, non_blocking=True)
+                coordinates_gt = data['coordinates'].to(self.device, non_blocking=True)
+                std_coors = data['std_coors'].to(self.device, non_blocking=True)
+                same_style_img_list = data['same_style_img_list'].to(self.device, non_blocking=True)
+                with torch.cuda.amp.autocast():
+                    predict = self.model(same_style_img_list, std_coors, char_img_gt)
+                    loss = self.criterion(predict, coordinates_gt)
+                    total_loss += loss.item()
+        avg_loss = total_loss / len(self.valid_loader)
+        logger.info(f"Validation loss at step {step}: {avg_loss:.4f}")
+        return avg_loss
+    def _save_checkpoint(self, step):
+        if step >= self.train_conf['SNAPSHOT_BEGIN'] and step % self.train_conf['SNAPSHOT_EPOCH'] == 0:
+            checkpoint_path = os.path.join(self.data_conf['save_model_dir'], f'checkpoint_step_{step}.pt')
+            model_state_dict = self.model.module.state_dict() if isinstance(self.model,
+                                                                            torch.nn.DataParallel) else self.model.state_dict()
+            torch.save({
+                'step': step,
+                'model_state_dict': model_state_dict,
+                'optimizer_state_dict': self.optimizer.state_dict(),
+                'loss': self.criterion
+            }, checkpoint_path)
+            logger.info(f"Checkpoint saved at step {step} to {checkpoint_path}")
+            checkpoints = sorted(
+                [f for f in os.listdir(self.data_conf['save_model_dir']) if f.startswith('checkpoint_step_')])
+            for old_checkpoint in checkpoints[:-10]:
+                os.remove(os.path.join(self.data_conf['save_model_dir'], old_checkpoint))
+    def _save_best_model(self, step, loss):
+        best_model_path = os.path.join(self.data_conf['save_model_dir'], 'best_model.pt')
+        model_state_dict = self.model.module.state_dict() if isinstance(self.model,
+                                                                        torch.nn.DataParallel) else self.model.state_dict()
+        torch.save({
+            'step': step,
+            'model_state_dict': model_state_dict,
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'loss': loss
+        }, best_model_path)
+        logger.info(f"Best model saved at step {step} with validation loss {loss:.4f} to {best_model_path}")
+    def _progress(self, step, num_epochs, start_time):
+        elapsed_time = time.time() - start_time
+        steps_per_epoch = len(self.train_loader)
+        total_steps = num_epochs * steps_per_epoch
+        eta = (elapsed_time / step) * (total_steps - step) if step > 0 else 0
+        eta_minutes, eta_seconds = divmod(eta, 60)
+        logger.info(
+            f"Step {step}/{total_steps}, ETA: {int(eta_minutes)}m {int(eta_seconds)}s, Elapsed time: {elapsed_time:.2f}s")
+```
 
+这个FontTrainer有好几个问题,
+1.loss输出有问题
+```
+INFO:z_new_start.FontTrainer:Step 17, Iteration time: 0.7053s, Loss: nan
+INFO:z_new_start.FontTrainer:Validation loss at step 17: nan
+INFO:z_new_start.FontTrainer:Step 17/3720, ETA: 784m 52s, Elapsed time: 216.20s
+```
+2.最好模型保存有问题,每一步都保存模型?很奇怪
+3.tqdm这儿按照epoch也有问题,应该是真正的总步数
+
+帮我优化之后给出1.优化思路,2.优化的关键代码
 
 ---
+
+执行报错:
+```
+ERROR:z_new_start.FontTrainer:Loss is NaN at step 0                                               | 0/186 [00:00<?, ?it/s]
+Epoch 1/20:   0%|                                                                                 | 0/186 [00:01<?, ?it/s]
+ERROR:z_new_start.FontTrainer:Error: Loss is NaN
+```
+
+```python
+class FontTrainer:
+    def __init__(self,
+                 model, train_loader, valid_loader, criterion, optimizer, device, train_conf, data_conf):
+        self.model = model
+        self.train_loader = train_loader
+        self.valid_loader = valid_loader
+        self.criterion = criterion
+        self.optimizer = optimizer
+        self.device = device
+        self.train_conf = train_conf
+        self.data_conf = data_conf
+        self.best_loss = float('inf')
+        self.scaler = torch.cuda.amp.GradScaler()
+        self.accumulation_steps = 32
+    def train(self):
+        num_epochs = self.train_conf['num_epochs']
+        max_steps = self.train_conf['MAX_STEPS']
+        logger.info(f"Start training epochs: {num_epochs}")
+        start_time = time.time()
+        step = 0
+        total_steps = num_epochs * len(self.train_loader)
+        pbar = tqdm(total=total_steps, desc="Training Progress")
+        for epoch in range(num_epochs):
+            train_loader_iter = iter(self.train_loader)
+            try:
+                while True:
+                    if max_steps and step >= max_steps:
+                        logger.info(
+                            f"Reached max steps: {max_steps}. Stopping training. The epoch:{epoch}. Total time: {time.time() - start_time:.2f}s")
+                        return
+                    data = next(train_loader_iter)
+                    self._train_iter(data, step)
+                    if (step + 1) % self.accumulation_steps == 0:
+                        self._save_checkpoint(step)
+                        val_loss = self._valid_iter(step)
+                        if val_loss < self.best_loss:
+                            self.best_loss = val_loss
+                            self._save_best_model(step, val_loss)
+                    step += 1
+                    pbar.update(1)
+            except StopIteration:
+                pass
+            except Exception as e:
+                pbar.close()
+                logger.error(f"Error: {e}\ntrain_loader_iter_epoch failed:{epoch}")
+                return
+        logger.info(f"Training finished. Total time: {time.time() - start_time:.2f}s")
+        pbar.close()
+    def _train_iter(self, data, step):
+        self.model.train()
+        iter_time = time.time()
+        char_img_gt = data['char_img'].to(self.device, non_blocking=True)
+        coordinates_gt = data['coordinates'].to(self.device, non_blocking=True)
+        std_coors = data['std_coors'].to(self.device, non_blocking=True)
+        same_style_img_list = data['same_style_img_list'].to(self.device, non_blocking=True)
+        with torch.cuda.amp.autocast():
+            predict = self.model(same_style_img_list, std_coors, char_img_gt)
+            assert predict.shape == coordinates_gt.shape, f"Shape mismatch: predict {predict.shape}, coordinates_gt {coordinates_gt.shape}"
+            loss = self.criterion(predict, coordinates_gt)
+            if torch.isnan(loss):
+                logger.error(f"Loss is NaN at step {step}")
+                raise ValueError("Loss is NaN")
+            loss = loss / self.accumulation_steps
+        self.optimizer.zero_grad()
+        self.scaler.scale(loss).backward()
+        if (step + 1) % self.accumulation_steps == 0:
+            self.scaler.step(self.optimizer)
+            self.scaler.update()
+        del data, predict, loss
+        torch.cuda.empty_cache()
+    def _valid_iter(self, step):
+        self.model.eval()
+        total_loss = 0
+        with torch.no_grad():
+            for data in self.valid_loader:
+                char_img_gt = data['char_img'].to(self.device, non_blocking=True)
+                coordinates_gt = data['coordinates'].to(self.device, non_blocking=True)
+                std_coors = data['std_coors'].to(self.device, non_blocking=True)
+                same_style_img_list = data['same_style_img_list'].to(self.device, non_blocking=True)
+                with torch.cuda.amp.autocast():
+                    predict = self.model(same_style_img_list, std_coors, char_img_gt)
+                    loss = self.criterion(predict, coordinates_gt)
+                    total_loss += loss.item()
+        avg_loss = total_loss / len(self.valid_loader)
+        logger.info(f"Validation loss at step {step}: {avg_loss:.4f}")
+        return avg_loss
+    def _save_checkpoint(self, step):
+        if step >= self.train_conf['SNAPSHOT_BEGIN'] and step % self.train_conf['SNAPSHOT_EPOCH'] == 0:
+            checkpoint_path = os.path.join(self.data_conf['save_model_dir'], f'checkpoint_step_{step}.pt')
+            model_state_dict = self.model.module.state_dict() if isinstance(self.model,
+                                                                            torch.nn.DataParallel) else self.model.state_dict()
+            torch.save({
+                'step': step,
+                'model_state_dict': model_state_dict,
+                'optimizer_state_dict': self.optimizer.state_dict(),
+                'loss': self.criterion
+            }, checkpoint_path)
+            logger.info(f"Checkpoint saved at step {step} to {checkpoint_path}")
+            checkpoints = sorted(
+                [f for f in os.listdir(self.data_conf['save_model_dir']) if f.startswith('checkpoint_step_')])
+            for old_checkpoint in checkpoints[:-10]:
+                os.remove(os.path.join(self.data_conf['save_model_dir'], old_checkpoint))
+    def _save_best_model(self, step, loss):
+        best_model_path = os.path.join(self.data_conf['save_model_dir'], 'best_model.pt')
+        model_state_dict = self.model.module.state_dict() if isinstance(self.model,
+                                                                        torch.nn.DataParallel) else self.model.state_dict()
+        torch.save({
+            'step': step,
+            'model_state_dict': model_state_dict,
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'loss': loss
+        }, best_model_path)
+        logger.info(f"Best model saved at step {step} with validation loss {loss:.4f} to {best_model_path}")
+        
+class FontLoss(nn.Module):
+    def __init__(self, coordinate_weight=1.0, stroke_weight=0.5):
+        super(FontLoss, self).__init__()
+        self.coordinate_weight = coordinate_weight
+        self.stroke_weight = stroke_weight
+        self.mse_loss = nn.MSELoss(reduction='mean')
+        self.l1_loss = nn.L1Loss(reduction='mean')
+
+    def forward(self, pred, target):
+        # 假设 pred 和 target 的形状是 [batch_size, seq_len, 4]
+        # 其中最后一维的4个值分别表示 [x, y, stroke_start, stroke_end]
+
+        # 坐标损失 (x, y)
+        coordinate_loss = self.mse_loss(pred[..., :2], target[..., :2])
+        # 笔画信息损失 (stroke_end, stroke_start)
+        stroke_loss = self.l1_loss(pred[..., 2:], target[..., 2:])
+        # 总损失
+        total_loss = self.coordinate_weight * coordinate_loss + self.stroke_weight * stroke_loss
+
+        return total_loss
+```
+
+
 
 ---
  

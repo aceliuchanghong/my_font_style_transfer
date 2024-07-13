@@ -1,3 +1,4 @@
+import torch
 import torch.nn as nn
 
 
@@ -20,6 +21,7 @@ class FontLoss(nn.Module):
         # 总损失
         total_loss = self.coordinate_weight * coordinate_loss + self.stroke_weight * stroke_loss
 
+        assert not torch.isnan(total_loss).any(), "NaN values in total_loss"
         return total_loss
 
 
