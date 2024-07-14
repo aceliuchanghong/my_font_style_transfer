@@ -40,7 +40,7 @@ class FontModel(nn.Module):
 
         self.pro_mlp_character = nn.Sequential(
             nn.Linear(512, 4096),
-            nn.GELU(),
+            nn.ReLU(),
             nn.Linear(4096, 256)
         )
         self.stroke_width_network = nn.Sequential(
@@ -107,9 +107,12 @@ class FontModel(nn.Module):
             使用 Xavier 均匀初始化方法进行初始化。这是一种常见的初始化策略，特别适用于深度学习模型。
             """
             if p.dim() > 1:
-                nn.init.xavier_uniform_(p)
+                # nn.init.xavier_uniform_(p)
+                nn.init.kaiming_uniform_(p, a=0, mode='fan_in', nonlinearity='relu')
 
     def forward(self, same_style_img_list, std_coors, char_img_gt):
+        if torch.isnan(same_style_img_list).any() or torch.isnan(std_coors).any() or torch.isnan(char_img_gt).any():
+            raise ValueError("Input data contains NaN values")
         logger.debug(
             f"Input shapes: \n"
             f"same_style_img_list={same_style_img_list.shape}\n"

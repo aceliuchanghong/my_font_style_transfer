@@ -31,7 +31,8 @@ class FontTrainer:
         start_time = time.time()
         step = 0
 
-        total_steps = num_epochs * len(self.train_loader)
+        total_steps = num_epochs * len(self.train_loader) if num_epochs * len(
+            self.train_loader) <= max_steps else max_steps
         pbar = tqdm(total=total_steps, desc="Training Progress")
 
         for epoch in range(num_epochs):
@@ -52,6 +53,7 @@ class FontTrainer:
                             self._save_best_model(step, val_loss)
                     step += 1
                     pbar.update(1)
+                    torch.cuda.empty_cache()
             except StopIteration:
                 pass
             except Exception as e:
@@ -63,7 +65,6 @@ class FontTrainer:
 
     def _train_iter(self, data, step):
         self.model.train()
-        iter_time = time.time()
         # 仅在需要时将数据放入 GPU
         char_img_gt = data['char_img'].to(self.device, non_blocking=True)
         coordinates_gt = data['coordinates'].to(self.device, non_blocking=True)
@@ -91,14 +92,13 @@ class FontTrainer:
                 raise ValueError("Loss is NaN")
             loss = loss / self.accumulation_steps
 
-        self.optimizer.zero_grad()
+        logger.info(f"Step {step}, Loss: {loss.item()}")
         self.scaler.scale(loss).backward()
         # 增加梯度累加
         if (step + 1) % self.accumulation_steps == 0:
+            self.optimizer.zero_grad()
             self.scaler.step(self.optimizer)
             self.scaler.update()
-
-        # logger.info(f"Step {step}, Iteration time: {time.time() - iter_time:.4f}s, Loss: {loss.item():.4f}")
 
         del data, predict, loss
         torch.cuda.empty_cache()
@@ -120,6 +120,7 @@ class FontTrainer:
                     predict = self.model(same_style_img_list, std_coors, char_img_gt)
                     loss = self.criterion(predict, coordinates_gt)
                     total_loss += loss.item()
+                torch.cuda.empty_cache()
         avg_loss = total_loss / len(self.valid_loader)
         logger.info(f"Validation loss at step {step}: {avg_loss:.4f}")
         return avg_loss

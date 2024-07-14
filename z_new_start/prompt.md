@@ -2707,7 +2707,183 @@ class FontLoss(nn.Module):
         return total_loss
 ```
 
-
+在做字体风格迁移的任务中,
+1.帮我检查这个是否可行
+2.给出forward每一步在做什么,有什么用?
+3.不知道为什么predicate全部是nan.帮我找找原因
+4.给出优化的思路和优化过后的关键代码,指出哪些是修改的部分
+模型定义如下:
+```python
+class FontModel(nn.Module):
+    def __init__(self,
+                 d_model=512,
+                 num_head=8,
+                 num_encoder_layers=2,
+                 num_glyph_encoder_layers=1,
+                 num_gly_decoder_layers=2,
+                 dim_feedforward=2048,
+                 dropout=0.2,
+                 activation="relu",
+                 normalize_before=True,
+                 return_intermediate_dec=True,
+                 train_conf=None
+                 ):
+        super(FontModel, self).__init__()
+        self.train_conf = train_conf
+        self.feat_encoder = self._build_feature_encoder()
+        self.base_encoder = self._build_base_encoder(
+            d_model, num_head, dim_feedforward, dropout, activation, normalize_before, num_encoder_layers
+        )
+        self.glyph_encoder = self._build_glyph_encoder(
+            d_model, num_head, dim_feedforward, dropout, activation, normalize_before, num_glyph_encoder_layers
+        )
+        self.content_encoder = Content_TR(d_model=d_model, num_encoder_layers=num_encoder_layers)
+        self.glyph_transformer_decoder = self._build_glyph_decoder(
+            d_model, num_head, dim_feedforward, dropout, activation, num_gly_decoder_layers
+        )
+        self.pro_mlp_character = nn.Sequential(
+            nn.Linear(512, 4096),
+            nn.GELU(),
+            nn.Linear(4096, 256)
+        )
+        self.stroke_width_network = nn.Sequential(
+            nn.Linear(256, 128),
+            nn.ReLU(),
+            nn.Linear(128, 1)
+        )
+        self.color_network = nn.Sequential(
+            nn.Linear(256, 128),
+            nn.ReLU(),
+            nn.Linear(128, 3)
+        )
+        self.SeqtoEmb = Seq2Emb(output_dim=d_model)
+        self.EmbtoSeq = Emb2Seq(input_dim=d_model)
+        self.add_position = PositionalEncoding(dim=d_model, dropout=0.1)
+        self.self_attention = nn.MultiheadAttention(d_model, num_head)
+        self._init_parameters()
+    def _build_feature_encoder(self):
+        return nn.Sequential(*(
+                [nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)]
+                +
+                list(models.resnet18(weights=ResNet18_Weights.IMAGENET1K_V1).children())[1:-2]
+        ))
+    def _build_base_encoder(self, d_model, num_head, dim_feedforward, dropout, activation, normalize_before,
+                            num_encoder_layers
+                            ):
+        encoder_layer = TransformerEncoderLayer(
+            d_model, num_head, dim_feedforward, dropout, activation, normalize_before
+        )
+        return TransformerEncoder(encoder_layer, num_encoder_layers)
+    def _build_glyph_encoder(self, d_model, num_head, dim_feedforward, dropout, activation, normalize_before,
+                             num_glyph_encoder_layers):
+        encoder_layer = TransformerEncoderLayer(
+            d_model, num_head, dim_feedforward, dropout, activation, normalize_before
+        )
+        glyph_norm = nn.LayerNorm(d_model) if normalize_before else None
+        return TransformerEncoder(encoder_layer, num_glyph_encoder_layers, glyph_norm)
+    def _build_glyph_decoder(self, d_model, num_head, dim_feedforward, dropout, activation, num_gly_decoder_layers):
+        glyph_decoder_layers = TransformerDecoderLayer(
+            d_model, num_head, dim_feedforward, dropout, activation
+        )
+        return TransformerDecoder(glyph_decoder_layers, num_gly_decoder_layers)
+    def _init_parameters(self):
+        for p in self.parameters():
+            if p.dim() > 1:
+                nn.init.xavier_uniform_(p)
+    def forward(self, same_style_img_list, std_coors, char_img_gt):
+        logger.debug(
+            f"Input shapes: \n"
+            f"same_style_img_list={same_style_img_list.shape}\n"
+            f"std_coors={std_coors.shape}\n"
+            f"char_img_gt={char_img_gt.shape}"
+        )
+        batch_size, num_img, temp, h, w = same_style_img_list.shape
+        style_img_list = same_style_img_list.view(-1, temp, h, w)
+        logger.debug(f"style_img_list shape: {style_img_list.shape}")
+        feat = self.feat_encoder(style_img_list)
+        logger.debug(f"feat shape after feat_encoder: {feat.shape}")
+        feat = feat.view(batch_size * num_img, 512, -1).permute(2, 0, 1)
+        logger.debug(f"feat shape after view and permute: {feat.shape}")
+        feat = self.add_position(feat)
+        feat = self.base_encoder(feat)
+        feat = self.glyph_encoder(feat)
+        glyph_memory = rearrange(feat, 't (b p n) c -> t (p b) n c',
+                                 b=batch_size, p=2, n=num_img // 2)
+        logger.debug(f"glyph_memory shape: {glyph_memory.shape}")
+        glyph_style = glyph_memory[:, :batch_size]
+        logger.debug(f"glyph_style shape: {glyph_style.shape}")
+        glyph_style = rearrange(glyph_style, 't b n c -> (t n) b c')
+        logger.debug(f"glyph_style shape after rearrange: {glyph_style.shape}")
+        glyph_style = self.add_position(glyph_style)
+        glyph_style, _ = self.self_attention(glyph_style, glyph_style, glyph_style)
+        logger.debug(f"glyph_style shape after attention: {glyph_style.shape}")
+        std_coors = rearrange(std_coors, 'b t n c -> b (t n) c')
+        logger.debug(f"std_coors shape after rearrange: {std_coors.shape}")
+        seq_emb = self.SeqtoEmb(std_coors).permute(1, 0, 2)
+        logger.debug(f"seq_emb shape: {seq_emb.shape}")
+        char_emb = self.content_encoder(char_img_gt)
+        logger.debug(f"char_emb shape: {char_emb.shape}")
+        tgt = torch.cat((char_emb, seq_emb), 0)
+        logger.debug(f"tgt shape: {tgt.shape}")
+        T, N, C = tgt.shape
+        tgt_mask = generate_square_subsequent_mask(T).to(tgt.device)
+        tgt = self.add_position(tgt)
+        logger.debug(f"tgt shape after add_position: {tgt.shape}")
+        hs = self.glyph_transformer_decoder(tgt, glyph_style, tgt_mask=tgt_mask)
+        logger.debug(f"hs shape: {hs.shape}")
+        h = hs.transpose(1, 2)[-1]
+        logger.debug(f"h shape: {h.shape}")
+        pred_sequence = self.EmbtoSeq(h)
+        logger.debug(f"pred_sequence shape: {pred_sequence.shape}")
+        B, T, _ = std_coors.shape
+        pred_sequence = pred_sequence[:, :T, :].view(B, self.train_conf['max_stroke'],
+                                                     self.train_conf['max_per_stroke_point'], -1)
+        logger.debug(f"pred_sequence shape after view: {pred_sequence.shape}")
+        return pred_sequence
+    @torch.jit.export
+    def inference(self, img_list):
+        self.eval()
+        device = next(self.parameters()).device
+        outputs = []
+        with torch.no_grad():
+            for img in img_list:
+                img = img.unsqueeze(0).to(device)
+                std_coors = torch.zeros(
+                    (1, self.train_conf['max_stroke'], self.train_conf['max_per_stroke_point'], 4)).to(device)
+                char_img_gt = img
+                pred_sequence = self.forward(img, std_coors, char_img_gt)
+                outputs.append(pred_sequence.cpu().numpy())
+        return outputs
+def generate_square_subsequent_mask(sz: int) -> Tensor:
+    mask = (torch.triu(torch.ones(sz, sz)) == 1).transpose(0, 1)
+    mask = (
+        mask
+        .float()
+        .masked_fill(mask == 0, float('-inf'))
+        .masked_fill(mask == 1, float(0.0))
+    )
+    return mask
+class Seq2Emb(nn.Module):
+    def __init__(self, output_dim, dropout=0.1):
+        super().__init__()
+        self.fc_1 = nn.Linear(4, 256)
+        self.fc_2 = nn.Linear(256, output_dim)
+        self.dropout = nn.Dropout(dropout)
+    def forward(self, seq):
+        x = self.dropout(torch.relu(self.fc_1(seq)))
+        x = self.fc_2(x)
+        return x
+class Emb2Seq(nn.Module):
+    def __init__(self, input_dim, dropout=0.1):
+        super().__init__()
+        self.fc_1 = nn.Linear(input_dim, 256)
+        self.fc_2 = nn.Linear(256, 4)
+        self.dropout = nn.Dropout(dropout)
+    def forward(self, seq):
+        x = self.dropout(torch.relu(self.fc_1(seq)))
+        x = self.fc_2(x)
+        return x
+```
 
 ---
  
