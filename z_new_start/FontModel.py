@@ -20,6 +20,7 @@ class FontModel(nn.Module):
                  dim_feedforward=2048,  # 前馈神经网络中隐藏层的大小
                  dropout=0.2,
                  activation="relu",
+                 # activation = "gelu",
                  normalize_before=True,  # 应用多头注意力和前馈神经网络之前是否对输入进行层归一化
                  return_intermediate_dec=True,  # 是否在解码过程中返回中间结果
                  train_conf=None
@@ -107,8 +108,8 @@ class FontModel(nn.Module):
             使用 Xavier 均匀初始化方法进行初始化。这是一种常见的初始化策略，特别适用于深度学习模型。
             """
             if p.dim() > 1:
-                # nn.init.xavier_uniform_(p)
-                nn.init.kaiming_uniform_(p, a=0, mode='fan_in', nonlinearity='relu')
+                nn.init.xavier_uniform_(p)
+                # nn.init.kaiming_uniform_(p, a=0, mode='fan_in', nonlinearity='relu')
 
     def forward(self, same_style_img_list, std_coors, char_img_gt):
         if torch.isnan(same_style_img_list).any() or torch.isnan(std_coors).any() or torch.isnan(char_img_gt).any():
@@ -125,14 +126,17 @@ class FontModel(nn.Module):
         style_img_list = same_style_img_list.view(-1, temp, h, w)
         logger.debug(f"style_img_list shape: {style_img_list.shape}")
 
-        # 提取风格图像特征
+        # [a] 提取风格图像特征
         # [B*N,C,h,w]==>[B*N, 64, h/2, w/2]==> [B*N, 512, h/32, w/32]
         feat = self.feat_encoder(style_img_list)
+        assert not torch.isnan(feat).any(), "NaN values after feat_encoder"
         logger.debug(f"feat shape after feat_encoder: {feat.shape}")
         # [B*N, 512, h/32, w/32]==>[B*N, 512, h/32 * w/32] ==> [h/32*w/32,B*N,512] = [4, 16, 512]
         feat = feat.view(batch_size * num_img, 512, -1).permute(2, 0, 1)
         logger.debug(f"feat shape after view and permute: {feat.shape}")
         feat = self.add_position(feat)
+
+        # [b] Encoding features using base_encoder and glyph_encoder
         feat = self.base_encoder(feat)
         feat = self.glyph_encoder(feat)
 
@@ -148,9 +152,13 @@ class FontModel(nn.Module):
         glyph_style = rearrange(glyph_style, 't b n c -> (t n) b c')
         logger.debug(f"glyph_style shape after rearrange: {glyph_style.shape}")
         glyph_style = self.add_position(glyph_style)
+
+        # [c] Self-attention on glyph style
         glyph_style, _ = self.self_attention(glyph_style, glyph_style, glyph_style)
         logger.debug(f"glyph_style shape after attention: {glyph_style.shape}")
 
+
+        # [d] Encoding standard coordinates and character embeddings
         # 处理标准坐标
         # [8, 20, 200, 4]=[B,20,200,4] ==> [B,4000,4]
         std_coors = rearrange(std_coors, 'b t n c -> b (t n) c')
@@ -158,11 +166,11 @@ class FontModel(nn.Module):
         # [B,4000,4]==>[B,4000,512]==>[4000,B,512]
         seq_emb = self.SeqtoEmb(std_coors).permute(1, 0, 2)
         logger.debug(f"seq_emb shape: {seq_emb.shape}")
-
         # 提取目标字符图像的内容特征
         # [bs, 1, 64, 64] = [B,C,H,W]==> [B,512,H/32,W/32]==>rearrange(x,'n c h w -> (h w) n c')=[4, B, 512]
         char_emb = self.content_encoder(char_img_gt)
         logger.debug(f"char_emb shape: {char_emb.shape}")
+
 
         # 准备解码器输入
         # [4000,B,512] + [4, B, 512] = [4004, B, 512]
@@ -173,6 +181,7 @@ class FontModel(nn.Module):
         tgt = self.add_position(tgt)
         logger.debug(f"tgt shape after add_position: {tgt.shape}")
 
+        # [e] Decoding using glyph_transformer_decoder
         # 使用解码器生成预测序列
         # [1, 4004, 8, 512]
         hs = self.glyph_transformer_decoder(tgt, glyph_style, tgt_mask=tgt_mask)
@@ -180,11 +189,11 @@ class FontModel(nn.Module):
         # [4004, 8, 512]
         h = hs.transpose(1, 2)[-1]
         logger.debug(f"h shape: {h.shape}")
+
+        # [f] Generating prediction sequence using EmbtoSeq network
         pred_sequence = self.EmbtoSeq(h)
         logger.debug(f"pred_sequence shape: {pred_sequence.shape}")
-
         B, T, _ = std_coors.shape  # [B,4000,4]
-
         pred_sequence = pred_sequence[:, :T, :].view(B, self.train_conf['max_stroke'],
                                                      self.train_conf['max_per_stroke_point'], -1)
         logger.debug(f"pred_sequence shape after view: {pred_sequence.shape}")

@@ -96,9 +96,11 @@ class FontTrainer:
         self.scaler.scale(loss).backward()
         # 增加梯度累加
         if (step + 1) % self.accumulation_steps == 0:
-            self.optimizer.zero_grad()
+            self.scaler.unscale_(self.optimizer)
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
             self.scaler.step(self.optimizer)
             self.scaler.update()
+            self.optimizer.zero_grad()
 
         del data, predict, loss
         torch.cuda.empty_cache()

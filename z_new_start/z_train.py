@@ -18,7 +18,6 @@ from z_new_start.FontConfig import new_start_config
 from z_new_start.FontDataset import FontDataset
 from z_new_start.FontTrainer import FontTrainer
 
-
 # 设置日志
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -65,13 +64,15 @@ def main(opt):
                               shuffle=True,
                               drop_last=False,
                               collate_fn=train_dataset.collect_function,
-                              num_workers=data_conf['NUM_THREADS'])
+                              num_workers=data_conf['NUM_THREADS'],
+                              pin_memory=True)
     valid_loader = DataLoader(valid_dataset,
                               batch_size=data_conf['PER_BATCH'],
                               shuffle=True,
                               drop_last=False,
                               collate_fn=valid_dataset.collect_function,
-                              num_workers=data_conf['NUM_THREADS'])
+                              num_workers=data_conf['NUM_THREADS'],
+                              pin_memory=True)
     model = FontModel(
         d_model=train_conf['d_model'],
         num_head=train_conf['num_head'],
@@ -104,6 +105,7 @@ def main(opt):
 
     criterion = FontLoss(coordinate_weight=1.0, stroke_weight=0.5)
     optimizer = optim.Adam(model.parameters(), lr=train_conf['LEARNING_RATE'])
+    # optimizer = torch.optim.AdamW(model.parameters(), lr=train_conf['LEARNING_RATE'], weight_decay=1e-2)
 
     logger.info(f"start training...")
     trainer = FontTrainer(

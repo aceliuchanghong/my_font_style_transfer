@@ -2885,8 +2885,42 @@ class Emb2Seq(nn.Module):
         return x
 ```
 
+ans:
+```text
+forward函数的主要步骤:
+a) 对输入图像进行特征提取
+b) 使用base_encoder和glyph_encoder对特征进行编码
+c) 对glyph style进行self-attention
+d) 将标准坐标和字符嵌入进行编码
+e) 使用glyph_transformer_decoder进行解码
+f) 最后通过EmbtoSeq网络生成预测序列
+
+predicate全部为nan的可能原因:
+梯度爆炸或消失
+输入数据存在异常值
+学习率设置不当
+模型初始化不当
+损失函数选择不合适
+```
+
 ---
- 
+
+1.forward函数的主要步骤:
+a) 对输入图像进行特征提取
+b) 使用base_encoder和glyph_encoder对特征进行编码
+c) 对glyph style进行self-attention
+d) 将标准坐标和字符嵌入进行编码
+e) 使用glyph_transformer_decoder进行解码
+f) 最后通过EmbtoSeq网络生成预测序列
+这样forward是否可行,帮我标注一下forward的代码哪一块是做什么的
+2.一直报错,怎么解决呀
+```text
+pred_sequence shape after view: torch.Size([8, 20, 200, 4])
+pred_sequence:...[[[..nan..]]]
+Training Progress:   0%|                                                                         | 0/3720 [00:02<?, ?it/s]
+ERROR:z_new_start.FontTrainer:Error: NaN values in total_loss
+train_loader_iter_epoch failed:0
+```
 
 
 ---
