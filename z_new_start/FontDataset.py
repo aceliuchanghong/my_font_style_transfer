@@ -27,7 +27,7 @@ class FontDataset(Dataset):
         self.coordinate_path = self.config[self.config_set]['z_coordinate_pkl_path']
         self.max_stroke = self.config['train']['max_stroke']
         self.max_per_stroke_point = self.config['train']['max_per_stroke_point']
-        self.num_img = 2
+        self.num_img = 16
 
         coors_pkl_list_all = get_files(self.coordinate_path, '.pkl')
         pics_pkl_list_all = get_files(self.pic_path, '.pkl')
@@ -49,7 +49,8 @@ class FontDataset(Dataset):
             font_coors_list = pickle.load(open(font_coors_pkl, 'rb'))
 
             # 获取同一种字体的self.num_img个图片
-            random_index = random.sample(range(len(font_pics_list)), self.num_img)
+            x = self.num_img if len(font_pics_list) >= self.num_img else len(font_pics_list)
+            random_index = random.sample(range(len(font_pics_list)), x)
             img_list = []
             for idx in random_index:
                 tmp_img = font_pics_list[idx]['img']

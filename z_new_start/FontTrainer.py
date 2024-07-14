@@ -27,13 +27,13 @@ class FontTrainer:
     def train(self):
         num_epochs = self.train_conf['num_epochs']
         max_steps = self.train_conf['MAX_STEPS']
-        logger.info(f"Start training epochs: {num_epochs}")
         start_time = time.time()
         step = 0
 
         total_steps = num_epochs * len(self.train_loader) if num_epochs * len(
             self.train_loader) <= max_steps else max_steps
         pbar = tqdm(total=total_steps, desc="Training Progress")
+        logger.info(f"Start training epochs: {total_steps / len(self.train_loader) + 1}")
 
         for epoch in range(num_epochs):
             train_loader_iter = iter(self.train_loader)
