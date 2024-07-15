@@ -203,7 +203,7 @@ class SDT_Generator(nn.Module):
         nce_emb = torch.stack((query_emb, pos_emb), 1)  # [B, 2, C]
         nce_emb = nn.functional.normalize(nce_emb, p=2, dim=2)
 
-        # glyph-nce
+        # glyph-nce NCE噪声对比估计（Noise Contrastive Estimation）嵌入
         patch_emb = glyph_memory[:, :batch_size]  # [4, B, N, C]
         # sample the positive pair
         anc, positive = self.random_double_sampling(patch_emb)

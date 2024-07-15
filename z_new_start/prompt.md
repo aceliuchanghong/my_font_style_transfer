@@ -2925,15 +2925,248 @@ train_loader_iter_epoch failed:0
 
 ---
 
+怎么知道什么时候需要把形状调成另外一个样子,有什么诀窍吗?
+```python
+    def forward(self, same_style_img_list, std_coors, char_img_gt):
+        check_tensor(same_style_img_list, "same_style_img_list")
+        check_tensor(std_coors, "std_coors")
+        check_tensor(char_img_gt, "char_img_gt")
+        logger.info(
+            f"Input shapes: \n"
+            f"same_style_img_list={same_style_img_list.shape}\n"
+            f"std_coors={std_coors.shape}\n"
+            f"char_img_gt={char_img_gt.shape}"
+        )
+        # [bs, num_img, C, 64, 64] == [B,N,C,H,W]
+        batch_size, num_img, temp, h, w = same_style_img_list.shape
+        # [B,N,C,H,W]==>[B*N,C,h,w]
+        style_img_list = same_style_img_list.view(-1, temp, h, w)
+        logger.info(f"style_img_list shape: {style_img_list.shape}")
+
+        # [a] 编码风格图像特征
+        # [B*N,C,h,w]==>[B*N, 64, h/2, w/2]==> [B*N, 512, h/32, w/32]
+        feat = self.feat_encoder(style_img_list)
+        check_tensor(feat, "feat after feat_encoder")
+        logger.info(f"feat shape after feat_encoder: {feat.shape}")
+
+        # [B*N, 512, h/32, w/32]==>[B*N, 512, h/32 * w/32] ==> [h/32*w/32,B*N,512] = [4, 16, 512]
+        feat = feat.view(batch_size * num_img, 512, -1).permute(2, 0, 1)
+        logger.info(f"feat shape after view and permute: {feat.shape}")
+        feat = self.add_position(feat)
+
+        feat = self.base_encoder(feat)
+        glyph_feat = self.glyph_encoder(feat)
+        font_feat = self.font_encoder(feat)
+        check_tensor(feat, "feat after base_encoder")
+        check_tensor(glyph_feat, "glyph_feat after glyph_encoder")
+        check_tensor(font_feat, "font_feat after font_encoder")
+
+        # 重新排列特征以分离风格和内容
+        # [h/32*w/32,B*N,512] ==> [h/32*w/32,2*B,N/2,512]
+        glyph_memory = rearrange(glyph_feat, 't (b p n) c -> t (p b) n c',
+                                 b=batch_size, p=2, n=num_img // 2)
+        font_memory = rearrange(font_feat, 't (b p n) c -> t (p b) n c',
+                                b=batch_size, p=2, n=num_img // 2)
+        logger.info(f"glyph_memory shape: {glyph_memory.shape}")
+        logger.info(f"font_memory shape: {font_memory.shape}")
+
+        font_memory_feat = rearrange(font_memory, 't b n c ->(t n) b c')
+
+        # [h/32*w/32,2*B,N/2,512] ==> [h/32*w/32,B,N/2,512]
+        glyph_style = glyph_memory[:, :batch_size]
+        logger.debug(f"glyph_style shape: {glyph_style.shape}")
+
+        # [c] Self-attention on glyph style
+        font_style = font_memory_feat[:, :batch_size, :]  # [4*N, B, C]
+        glyph_style = glyph_memory[:, :batch_size]  # [4, B, N, C]
+        glyph_style = rearrange(glyph_style, 't b n c -> (t n) b c')  # [4*N, B, C]
+
+        # [d] Encoding standard coordinates and character embeddings
+        # 处理标准坐标
+        # [8, 20, 200, 4]=[B,20,200,4] ==> [B,4000,4]
+        # std_coors = rearrange(std_coors, 'b t n c -> b (t n) c')
+        # logger.debug(f"std_coors shape after rearrange: {std_coors.shape}")
+        # [B,4000,4]==>[B,4000,512]==>[4000,B,512]
+        seq_emb = self.SeqtoEmb(std_coors).permute(1, 0, 2)
+        T, N, C = seq_emb.shape
+        logger.debug(f"seq_emb shape: {seq_emb.shape}")
+        check_tensor(seq_emb, "seq_emb after SeqtoEmb")
+
+        # 提取目标字符图像的内容特征
+        # [bs, 1, 64, 64] = [B,C,H,W]==> [B,512,H/32,W/32]==>rearrange(x,'n c h w -> (h w) n c')=[4, B, 512]
+        char_emb = self.content_encoder(char_img_gt)
+        logger.debug(f"char_emb shape: {char_emb.shape}")
+        check_tensor(char_emb, "char_emb after content_encoder")
+        char_emb = torch.mean(char_emb, 0)
+        char_emb = repeat(char_emb, 'n c -> t n c', t=1)
+        # 准备解码器输入
+        # [4000,B,512] + [4, B, 512] = [4004, B, 512]
+        tgt = torch.cat((char_emb, seq_emb), 0)
+        logger.debug(f"tgt shape: {tgt.shape}")
+        tgt_mask = generate_square_subsequent_mask(T + 1).to(tgt.device)
+        tgt = self.add_position(tgt)
+        logger.debug(f"tgt shape after add_position: {tgt.shape}")
+        check_tensor(tgt, "tgt after add_position")
+        check_tensor(glyph_style, "glyph_style before glyph_transformer_decoder")
+        # check_tensor(tgt_mask, "tgt_mask")
+
+        # [e] Decoding using glyph_transformer_decoder
+        # 使用解码器生成预测序列
+        # [1, 4004, 8, 512]
+        font_hs = self.font_transformer_decoder(tgt, font_style, tgt_mask=tgt_mask)
+        hs = self.glyph_transformer_decoder(font_hs[-1], glyph_style, tgt_mask)
+        logger.debug(f"hs shape: {hs.shape}")
+        check_tensor(hs, "hs after glyph_transformer_decoder")
+        # [4004, 8, 512]
+        h = hs.transpose(1, 2)[-1]
+        logger.debug(f"h shape: {h.shape}")
+        check_tensor(h, "h after transpose")
+
+        # [f] Generating prediction sequence using EmbtoSeq network
+        pred_sequence = self.EmbtoSeq(h)
+        logger.debug(f"pred_sequence shape: {pred_sequence.shape}")
+        check_tensor(pred_sequence, "pred_sequence after EmbtoSeq")
+
+        B, T, _ = std_coors.shape  # [B,4000,4]
+        pred_sequence = pred_sequence[:, :T, :].view(B, self.train_conf['max_stroke'],
+                                                     self.train_conf['max_per_stroke_point'], -1)
+        logger.debug(f"pred_sequence shape after view: {pred_sequence.shape}")
+        check_tensor(pred_sequence, "pred_sequence after view")
+        return pred_sequence
+```
+
+ans:
+```text
+常见的诀窍,何时需要调整张量的形状：
+适应模型输入要求：
+确保张量的形状符合模型的输入要求。例如，如果模型期望输入形状为 [B, C, H, W]，而你的数据形状为 [B, N, C, H, W]，你可能需要调整形状。
+进行批处理：
+如果你有多个样本，并且希望将它们作为一个批次输入到模型中，你可能需要将它们合并成一个张量，并调整形状以适应批处理。
+特征提取和编码：
+在进行特征提取或编码时，可能需要将张量重新排列或调整形状，以便进行卷积、池化或其他操作。
+自注意力机制：
+在使用自注意力机制（如Transformer）时，通常需要将张量调整为特定的形状，以便进行序列处理。
+解码和生成：
+在解码和生成阶段，可能需要将张量重新排列或调整形状，以便生成最终的输出序列
+
+view() 或 reshape(): 用于改变张量的形状而不改变其数据。
+permute() 或 transpose(): 用于交换维度。
+unsqueeze(): 用于添加一个维度。
+squeeze(): 用于移除大小为1的维度。
+
+卷积网络通常期望输入的形状为 [batch_size, C, H, W]
+编码器通常要求输入的形状为 [sequence_length, batch_size, embedding_dim]
+```
+
+---
+
+```python
+    def forward(self, style_imgs, seq, char_img):
+        # style_imgs 是风格图片的输入，seq 是序列输入，char_img 是字符图片输入。
+        # 风格图片的批次大小、图片数量、通道数、高度和宽度。
+        batch_size, num_imgs, in_planes, h, w = style_imgs.shape
+
+        style_imgs = style_imgs.view(-1, in_planes, h, w)  # [B*2N, C:1, H, W]
+        style_embe = self.Feat_Encoder(style_imgs)  # [B*2N, C:512, 2, 2]
+
+        anchor_num = num_imgs // 2
+        # [4, B*2N, C:512] permute,改变张量的维度顺序
+        style_embe = style_embe.view(batch_size * num_imgs, 512, -1).permute(2, 0, 1)
+        FEAT_ST_ENC = self.add_position(style_embe)
+
+        memory = self.base_encoder(FEAT_ST_ENC)  # [4, B*2N, C]
+        writer_memory = self.writer_head(memory)
+        glyph_memory = self.glyph_head(memory)
+
+        writer_memory = rearrange(writer_memory, 't (b p n) c -> t (p b) n c',
+                                  b=batch_size, p=2, n=anchor_num)  # [4, 2*B, N, C]
+        glyph_memory = rearrange(glyph_memory, 't (b p n) c -> t (p b) n c',
+                                 b=batch_size, p=2, n=anchor_num)  # [4, 2*B, N, C]
+
+        # writer-nce
+        memory_fea = rearrange(writer_memory, 't b n c ->(t n) b c')  # [4*N, 2*B, C]
+        # 计算memory_fea张量在第0个维度上的平均值
+        compact_fea = torch.mean(memory_fea, 0)  # [2*B, C]
+        # compact_fea:[2*B, C:512] ->  nce_emb: [B, 2, C:128]
+        pro_emb = self.pro_mlp_writer(compact_fea)
+        query_emb = pro_emb[:batch_size, :]
+        pos_emb = pro_emb[batch_size:, :]
+        # 将两个嵌入向量（query_emb和pos_emb）沿着第二个维度（索引为1）堆叠起来，形成一个新的张量
+        nce_emb = torch.stack((query_emb, pos_emb), 1)  # [B, 2, C]
+        nce_emb = nn.functional.normalize(nce_emb, p=2, dim=2)
+
+        # glyph-nce
+        patch_emb = glyph_memory[:, :batch_size]  # [4, B, N, C]
+        # sample the positive pair
+        anc, positive = self.random_double_sampling(patch_emb)
+        n_channels = anc.shape[-1]
+        # -1：这是一个特殊的值，表示该维度的大小由其他维度和总元素数量决定
+        anc = anc.reshape(batch_size, -1, n_channels)
+        # 如果anc是一个形状为(m, n)的二维张量，
+        # 那么torch.mean(anc, 1, keepdim=True)将返回一个形状为(m, 1)的二维张量，
+        # 其中每个元素是原始张量对应行的均值
+        anc_compact = torch.mean(anc, 1, keepdim=True)
+        anc_compact = self.pro_mlp_character(anc_compact)  # [B, 1, C]
+        positive = positive.reshape(batch_size, -1, n_channels)
+        positive_compact = torch.mean(positive, 1, keepdim=True)
+        positive_compact = self.pro_mlp_character(positive_compact)  # [B, 1, C]
+
+        nce_emb_patch = torch.cat((anc_compact, positive_compact), 1)  # [B, 2, C]
+        nce_emb_patch = nn.functional.normalize(nce_emb_patch, p=2, dim=2)
+
+        # input the writer-wise & character-wise styles into the decoder
+        writer_style = memory_fea[:, :batch_size, :]  # [4*N, B, C]
+        glyph_style = glyph_memory[:, :batch_size]  # [4, B, N, C]
+        glyph_style = rearrange(glyph_style, 't b n c -> (t n) b c')  # [4*N, B, C]
+
+        # QUERY: [char_emb, seq_emb]
+        seq_emb = self.SeqtoEmb(seq).permute(1, 0, 2)
+        T, N, C = seq_emb.shape
+
+        char_emb = self.content_encoder(char_img)  # [4, N, 512]
+        char_emb = torch.mean(char_emb, 0)  # [N, 512]
+        char_emb = repeat(char_emb, 'n c -> t n c', t=1)
+        tgt = torch.cat((char_emb, seq_emb), 0)  # [1+T], put the content token as the first token
+        tgt_mask = generate_square_subsequent_mask(sz=(T + 1)).to(tgt)
+        tgt = self.add_position(tgt)
+
+        # [wri_dec_layers, T, B, C]
+        wri_hs = self.wri_decoder(tgt, writer_style, tgt_mask=tgt_mask)
+        # [gly_dec_layers, T, B, C]
+        hs = self.gly_decoder(wri_hs[-1], glyph_style, tgt_mask=tgt_mask)
+
+        # 将矩阵hs的第二和第三维度进行转置
+        h = hs.transpose(1, 2)[-1]  # B T C
+        pred_sequence = self.EmbtoSeq(h)
+        return pred_sequence, nce_emb, nce_emb_patch
+```
+为什么需要做这个操作呢?
+rearrange(glyph_feat, 't (b p n) c -> t (p b) n c',b=batch_size, p=2, n=num_img // 2)
+
+---
+
+正样本和负样本,什么意思?
+
+ans:
+```text
+正样本（Positive Samples）：
+这些是与目标或锚点样本相似或相关的样本。
+在对比学习中，正样本通常是同一类别的不同实例，或者是同一对象的不同视角/变换。
+例如，如果我们在学习人脸识别，同一个人的不同照片就可以被视为正样本。
+
+负样本（Negative Samples）：
+这些是与目标或锚点样本不同或不相关的样本。
+在对比学习中，负样本通常是不同类别的实例。
+继续人脸识别的例子，不同人的照片就可以被视为负样本。
+
+锚点的基本定义：
+锚点是一个参考点或基准样本，用于与其他样本进行比较。
+在对比学习中，锚点通常是我们要学习表示的主要样本。
+```
+
 ---
  
-
-
----
-
----
- 
-
+为什么Glyph-NCE 特征计算和Writer-NCE 特征计算差别这么大?
 
 ---
 
