@@ -2,7 +2,7 @@ import torchvision.models as models
 from torchvision.models.resnet import ResNet18_Weights
 from models.transformer import PositionalEncoding, TransformerEncoderLayer, TransformerEncoder
 from models.encoder import Content_TR
-from einops import rearrange
+from einops import rearrange, repeat
 import logging
 from z_new_start.FontTransformer import TransformerDecoderLayer, TransformerDecoder
 from torch import nn, Tensor
@@ -187,12 +187,8 @@ class FontModel(nn.Module):
                                 b=batch_size, p=2, n=num_img // 2)  # [4, 2*B, N, C]
         logger.info(f"glyph_memory shape: {glyph_memory.shape}")
 
-        # [h/32*w/32,2*B,N/2,512] ==> [h/32*w/32,B,N/2,512]
-        glyph_style = glyph_memory[:, :batch_size]
-        logger.debug(f"glyph_style shape: {glyph_style.shape}")
-
-        glyph_style, _ = self.self_attention(glyph_style, glyph_style, glyph_style)
-        logger.debug(f"glyph_style shape after attention: {glyph_style.shape}")
+        # glyph_style, _ = self.self_attention(glyph_style, glyph_style, glyph_style)
+        # logger.debug(f"glyph_style shape after attention: {glyph_style.shape}")
 
         # [c] 计算对比学习嵌入（NCE）特征
         # 计算用于对比学习的嵌入特征，分别处理 font 和 glyph 特征
@@ -217,10 +213,16 @@ class FontModel(nn.Module):
         nce_emb_patch = nn.functional.normalize(nce_emb_patch, p=2, dim=2)  # 特征组合和归一化
 
         # [d] 解码和生成预测序列
+        font_style = memory_feat[:, :batch_size, :]
+        # [h/32*w/32,2*B,N/2,512] ==> [h/32*w/32,B,N/2,512]
+        glyph_style = glyph_memory[:, :batch_size]
+        logger.debug(f"glyph_style shape: {glyph_style.shape}")
+        glyph_style = rearrange(glyph_style, 't b n c -> (t n) b c')
+
         # 处理标准坐标
         # [8, 20, 200, 4]=[B,20,200,4] ==> [B,4000,4]
-        # std_coors = rearrange(std_coors, 'b t n c -> b (t n) c')
-        # logger.debug(f"std_coors shape after rearrange: {std_coors.shape}")
+        std_coors = rearrange(std_coors, 'b t n c -> b (t n) c')
+        logger.debug(f"std_coors shape after rearrange: {std_coors.shape}")
         # [B,4000,4]==>[B,4000,512]==>[4000,B,512]
         seq_emb = self.SeqtoEmb(std_coors).permute(1, 0, 2)
         T, N, C = seq_emb.shape
@@ -234,7 +236,6 @@ class FontModel(nn.Module):
         check_tensor(char_emb, "char_emb after content_encoder")
         char_emb = torch.mean(char_emb, 0)
         char_emb = repeat(char_emb, 'n c -> t n c', t=1)
-        # 准备解码器输入
         # [4000,B,512] + [4, B, 512] = [4004, B, 512]
         tgt = torch.cat((char_emb, seq_emb), 0)
         logger.debug(f"tgt shape: {tgt.shape}")
@@ -245,8 +246,7 @@ class FontModel(nn.Module):
         check_tensor(glyph_style, "glyph_style before glyph_transformer_decoder")
         # check_tensor(tgt_mask, "tgt_mask")
 
-        # [e] Decoding using glyph_transformer_decoder
-        # 使用解码器生成预测序列
+        # [e] 使用解码器生成预测序列
         # [1, 4004, 8, 512]
         font_hs = self.font_transformer_decoder(tgt, font_style, tgt_mask=tgt_mask)
         hs = self.glyph_transformer_decoder(font_hs[-1], glyph_style, tgt_mask)
