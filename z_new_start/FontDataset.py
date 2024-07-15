@@ -169,10 +169,6 @@ class FontDataset(Dataset):
         batch_same_style_img_list = torch.stack(
             [item['same_style_img_list'] for item in batch_data])  # torch.Size([bs, num_img, C, 64, 64])
 
-        # print(batch_char_img.shape)
-        # print(batch_coordinates.shape)
-        # print(batch_label_ids.shape)
-
         return {
             'char_img': batch_char_img,
             'coordinates': batch_coordinates,

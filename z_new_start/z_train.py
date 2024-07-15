@@ -46,7 +46,6 @@ def main(opt):
     # 禁用 cuDNN autotuner
     torch.backends.cudnn.benchmark = False
     torch.backends.cudnn.deterministic = True
-
     # 强制禁用 cuDNN 后端
     torch.backends.cudnn.enabled = False
 
@@ -105,7 +104,6 @@ def main(opt):
 
     criterion = FontLoss(coordinate_weight=1.0, stroke_weight=0.5)
     optimizer = optim.Adam(model.parameters(), lr=train_conf['LEARNING_RATE'])
-    # optimizer = torch.optim.AdamW(model.parameters(), lr=train_conf['LEARNING_RATE'], weight_decay=1e-2)
 
     logger.info(f"start training...")
     trainer = FontTrainer(
@@ -130,6 +128,5 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--pretrained_model', default='', help='pre-trained model')
     parser.add_argument('--dev', action='store_true', help='加--dev则opt.dev=True为生产环境')
-    parser.add_argument('--log', default='Chinese_log', help='the filename of log')
     opt = parser.parse_args()
     main(opt)

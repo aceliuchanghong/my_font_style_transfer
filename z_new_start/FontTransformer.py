@@ -50,6 +50,7 @@ class TransformerDecoder(nn.Module):
                            pos=pos, query_pos=query_pos)
             # if torch.isnan(output).any():
             #     logger.error(f"NaN values found in {str(i)}layer output")
+            logging.debug(f"{i} layer")
             if self.return_intermediate:
                 intermediate.append(self.norm(output))
 
@@ -91,6 +92,30 @@ class TransformerDecoderLayer(nn.Module):
         self.activation = _get_activation_func(activation)
         self.normalize_before = normalize_before
 
+    def forward(self, tgt, memory,
+                tgt_mask: Optional[Tensor] = None,
+                memory_mask: Optional[Tensor] = None,
+                tgt_key_padding_mask: Optional[Tensor] = None,
+                memory_key_padding_mask: Optional[Tensor] = None,
+                pos: Optional[Tensor] = None,
+                query_pos: Optional[Tensor] = None):
+        for name, tensor in [('tgt', tgt), ('memory', memory), ('tgt_mask', tgt_mask),
+                             ('memory_mask', memory_mask), ('tgt_key_padding_mask', tgt_key_padding_mask),
+                             ('memory_key_padding_mask', memory_key_padding_mask),
+                             ('pos', pos), ('query_pos', query_pos)]:
+            if tensor is not None and torch.isnan(tensor).any():
+                logger.error(f"NaN found in {name} at start of TransformerDecoderLayer.forward")
+        if self.normalize_before:
+            out = self.forward_pre(tgt, memory, tgt_mask, memory_mask,
+                                   tgt_key_padding_mask, memory_key_padding_mask, pos, query_pos)
+        else:
+            out = self.forward_post(tgt, memory, tgt_mask, memory_mask,
+                                    tgt_key_padding_mask, memory_key_padding_mask, pos, query_pos)
+
+        if torch.isnan(out).any():
+            logger.error("NaN values found in TransformerDecoderLayer output")
+        return out
+
     def with_pos_embed(self, tensor, pos: Optional[Tensor]):
         return tensor if pos is None else tensor + pos
 
@@ -102,25 +127,21 @@ class TransformerDecoderLayer(nn.Module):
                      pos: Optional[Tensor] = None,
                      query_pos: Optional[Tensor] = None):
 
+        # 初始检查
         if torch.isnan(tgt).any():
-            logger.error("NaN values found in tgt output")
-            print(tgt)
-            logger.error("NaN values found in tgt output")
-        if torch.isnan(memory).any():
-            logger.error("NaN values found in memory output")
-            print(memory)
-            logger.error("NaN values found in memory output")
-        if torch.isnan(tgt_mask).any():
-            logger.error("NaN values found in tgt_mask output")
-            print(tgt_mask)
-            logger.error("NaN values found in tgt_mask output")
+            logger.error("NaN in tgt at start of forward_post")
+
         q = k = self.with_pos_embed(tgt, query_pos)
+        # 检查位置编码后
+        if torch.isnan(q).any():
+            logger.error("NaN in q after with_pos_embed")
+
         tgt2 = self.self_attn(q, k, value=tgt, attn_mask=tgt_mask,
                               key_padding_mask=tgt_key_padding_mask)[0]
+        # 检查自注意力后
         if torch.isnan(tgt2).any():
-            logger.error("NaN values found in tgt2 output")
-            print(tgt2)
-            logger.error("NaN values found in tgt2 output")
+            logger.error("NaN in tgt2 after self_attn")
+
         tgt = tgt + self.dropout1(tgt2)
         tgt = self.norm1(tgt)
         tgt2 = self.multihead_attn(query=self.with_pos_embed(tgt, query_pos),
@@ -157,24 +178,6 @@ class TransformerDecoderLayer(nn.Module):
         tgt2 = self.linear2(self.dropout(self.activation(self.linear1(tgt2))))
         tgt = tgt + self.dropout3(tgt2)
         return tgt
-
-    def forward(self, tgt, memory,
-                tgt_mask: Optional[Tensor] = None,
-                memory_mask: Optional[Tensor] = None,
-                tgt_key_padding_mask: Optional[Tensor] = None,
-                memory_key_padding_mask: Optional[Tensor] = None,
-                pos: Optional[Tensor] = None,
-                query_pos: Optional[Tensor] = None):
-        if self.normalize_before:
-            out = self.forward_pre(tgt, memory, tgt_mask, memory_mask,
-                                   tgt_key_padding_mask, memory_key_padding_mask, pos, query_pos)
-        else:
-            out = self.forward_post(tgt, memory, tgt_mask, memory_mask,
-                                    tgt_key_padding_mask, memory_key_padding_mask, pos, query_pos)
-
-        if torch.isnan(out).any():
-            logger.error("NaN values found in TransformerDecoderLayer output")
-        return out
 
 
 def _get_activation_func(activation):

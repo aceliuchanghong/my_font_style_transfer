@@ -70,9 +70,6 @@ class FontTrainer:
         coordinates_gt = data['coordinates'].to(self.device, non_blocking=True)
         std_coors = data['std_coors'].to(self.device, non_blocking=True)
         same_style_img_list = data['same_style_img_list'].to(self.device, non_blocking=True)
-        # 先不放不需要的
-        # std_img = data['std_img'].to(self.device)
-        # label_ids = data['label_ids'].to(self.device)
 
         assert not torch.isnan(char_img_gt).any(), "NaN values in char_img_gt"
         assert not torch.isnan(coordinates_gt).any(), "NaN values in coordinates_gt"
@@ -114,9 +111,6 @@ class FontTrainer:
                 coordinates_gt = data['coordinates'].to(self.device, non_blocking=True)
                 std_coors = data['std_coors'].to(self.device, non_blocking=True)
                 same_style_img_list = data['same_style_img_list'].to(self.device, non_blocking=True)
-
-                # std_img = data['std_img'].to(self.device)
-                # label_ids = data['label_ids'].to(self.device)
 
                 with torch.cuda.amp.autocast():  # 使用自动混合精度
                     predict = self.model(same_style_img_list, std_coors, char_img_gt)

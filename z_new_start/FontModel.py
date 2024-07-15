@@ -187,6 +187,10 @@ class FontModel(nn.Module):
         # [1, 4004, 8, 512]
         if torch.isnan(tgt).any():
             logger.error("NaN values found in tgt in")
+        if torch.isnan(glyph_style).any():
+            logger.error("NaN values found in glyph_style in")
+        if torch.isnan(tgt_mask).any():
+            logger.error("NaN values found in tgt_mask in")
         hs = self.glyph_transformer_decoder(tgt, glyph_style, tgt_mask)
         logger.debug(f"hs shape: {hs.shape}")
         # [4004, 8, 512]
