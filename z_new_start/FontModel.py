@@ -1,12 +1,15 @@
 import torchvision.models as models
 from torchvision.models.resnet import ResNet18_Weights
-from models.transformer import *
+from models.transformer import PositionalEncoding, TransformerEncoderLayer, TransformerEncoder
 from models.encoder import Content_TR
 from einops import rearrange
 import logging
+from z_new_start.FontTransformer import TransformerDecoderLayer, TransformerDecoder
+from torch import nn, Tensor
+import torch
 
 # 设置日志
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 
@@ -15,7 +18,7 @@ class FontModel(nn.Module):
                  d_model=512,
                  num_head=8,
                  num_encoder_layers=2,
-                 num_glyph_encoder_layers=1,
+                 num_glyph_encoder_layers=2,
                  num_gly_decoder_layers=2,
                  dim_feedforward=2048,  # 前馈神经网络中隐藏层的大小
                  dropout=0.2,
@@ -157,7 +160,6 @@ class FontModel(nn.Module):
         glyph_style, _ = self.self_attention(glyph_style, glyph_style, glyph_style)
         logger.debug(f"glyph_style shape after attention: {glyph_style.shape}")
 
-
         # [d] Encoding standard coordinates and character embeddings
         # 处理标准坐标
         # [8, 20, 200, 4]=[B,20,200,4] ==> [B,4000,4]
@@ -171,7 +173,6 @@ class FontModel(nn.Module):
         char_emb = self.content_encoder(char_img_gt)
         logger.debug(f"char_emb shape: {char_emb.shape}")
 
-
         # 准备解码器输入
         # [4000,B,512] + [4, B, 512] = [4004, B, 512]
         tgt = torch.cat((char_emb, seq_emb), 0)
@@ -184,7 +185,9 @@ class FontModel(nn.Module):
         # [e] Decoding using glyph_transformer_decoder
         # 使用解码器生成预测序列
         # [1, 4004, 8, 512]
-        hs = self.glyph_transformer_decoder(tgt, glyph_style, tgt_mask=tgt_mask)
+        if torch.isnan(tgt).any():
+            logger.error("NaN values found in tgt in")
+        hs = self.glyph_transformer_decoder(tgt, glyph_style, tgt_mask)
         logger.debug(f"hs shape: {hs.shape}")
         # [4004, 8, 512]
         h = hs.transpose(1, 2)[-1]

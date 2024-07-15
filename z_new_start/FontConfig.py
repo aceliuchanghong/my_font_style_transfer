@@ -46,8 +46,9 @@ new_start_config = {
         'num_glyph_encoder_layers': 2,
         'num_gly_decoder_layers': 2,
         'dim_feedforward': 2048,
-        'dropout': 0.2,
+        'dropout': 0.1,
         'max_stroke': 20,
         'max_per_stroke_point': 200,
+        'style_img_num': 12,
     }
 }

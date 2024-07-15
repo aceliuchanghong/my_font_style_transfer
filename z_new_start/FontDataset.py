@@ -27,7 +27,7 @@ class FontDataset(Dataset):
         self.coordinate_path = self.config[self.config_set]['z_coordinate_pkl_path']
         self.max_stroke = self.config['train']['max_stroke']
         self.max_per_stroke_point = self.config['train']['max_per_stroke_point']
-        self.num_img = 16
+        self.num_img = self.config['train']['style_img_num']
 
         coors_pkl_list_all = get_files(self.coordinate_path, '.pkl')
         pics_pkl_list_all = get_files(self.pic_path, '.pkl')
