@@ -94,7 +94,7 @@ class FontTrainer:
         # 增加梯度累加
         if (step + 1) % self.accumulation_steps == 0:
             self.scaler.unscale_(self.optimizer)
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)  # 梯度裁剪
             self.scaler.step(self.optimizer)
             self.scaler.update()
             self.optimizer.zero_grad()

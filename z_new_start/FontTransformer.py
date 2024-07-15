@@ -114,6 +114,7 @@ class TransformerDecoderLayer(nn.Module):
 
         if torch.isnan(out).any():
             logger.error("NaN values found in TransformerDecoderLayer output")
+            logger.error(f"Layer output stats - min: {out.min()}, max: {out.max()}, mean: {out.mean()}")
         return out
 
     def with_pos_embed(self, tensor, pos: Optional[Tensor]):
@@ -185,9 +186,7 @@ def _get_activation_func(activation):
         return F.relu
     if activation == "gelu":
         return F.gelu
-    if activation == "glu":
-        return F.glu
-    raise RuntimeError(F"activation should be relu/gelu/glu, not {activation}.")
+    raise RuntimeError(F"activation should be relu/gelu, not {activation}.")
 
 
 def _get_clone(module, N):
