@@ -3170,9 +3170,30 @@ ans:
 
 ---
 
+std_coors.shape==>[4000,B,4]
+seq_emb = self.SeqtoEmb(std_coors)的形状是怎么变化的
+```
+class Seq2Emb(nn.Module):
+
+    def __init__(self, output_dim, dropout=0.1):
+        super().__init__()
+        self.fc_1 = nn.Linear(4, 256)
+        self.fc_2 = nn.Linear(256, 512)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, seq):
+        x = self.dropout(torch.relu(self.fc_1(seq)))
+        x = self.fc_2(x)
+        return x
+```
+
 ---
  
-
+char_emb.shape==>[4, B, 512]
+char_emb = torch.mean(char_emb, 0)
+char_emb = repeat(char_emb, 'n c -> t n c', t=1)
+char_emb的形状是怎么变化的?
+可以使用 unsqueeze 替换 repeat 来实现相同的效果?
 
 ---
 

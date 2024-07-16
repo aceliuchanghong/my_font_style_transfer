@@ -104,6 +104,7 @@ if __name__ == '__main__':
     python read_coordinates_pkl.py
     python read_coordinates_pkl.py --pkl ../ABtest/files/AB_coors/AliHYAiHei.pkl
     python read_coordinates_pkl.py --pkl ../ABtest/files/LXGWWenKaiGB-Light.pkl
+    python read_coordinates_pkl.py --pkl ../ABtest/files/LXGWWenKaiGB-Light.pkl --noise 0.03
     """
     parser = argparse.ArgumentParser()
     parser.add_argument('--out_path', default='coors_test_path', help='输出图片目录')
