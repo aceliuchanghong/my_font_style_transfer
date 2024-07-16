@@ -330,7 +330,7 @@ class Emb2Seq(nn.Module):
     def __init__(self, input_dim, dropout=0.1):
         super().__init__()
         self.fc_1 = nn.Linear(input_dim, 256)
-        self.fc_2 = nn.Linear(256, 4 * 24 + 2)
+        self.fc_2 = nn.Linear(256, 4)  # 4 * 24 + 2
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, seq):

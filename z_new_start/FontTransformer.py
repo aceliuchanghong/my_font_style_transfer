@@ -104,7 +104,7 @@ class TransformerDecoderLayer(nn.Module):
                              ('memory_key_padding_mask', memory_key_padding_mask),
                              ('pos', pos), ('query_pos', query_pos)]:
             if tensor is not None and torch.isnan(tensor).any():
-                logger.error(f"NaN found in {name} at start of TransformerDecoderLayer.forward")
+                logger.debug(f"NaN found in {name} at start of TransformerDecoderLayer.forward")
         if self.normalize_before:
             out = self.forward_pre(tgt, memory, tgt_mask, memory_mask,
                                    tgt_key_padding_mask, memory_key_padding_mask, pos, query_pos)
@@ -113,8 +113,8 @@ class TransformerDecoderLayer(nn.Module):
                                     tgt_key_padding_mask, memory_key_padding_mask, pos, query_pos)
 
         if torch.isnan(out).any():
-            logger.error("NaN values found in TransformerDecoderLayer output")
-            logger.error(f"Layer output stats - min: {out.min()}, max: {out.max()}, mean: {out.mean()}")
+            logger.debug("NaN values found in TransformerDecoderLayer output")
+            logger.debug(f"Layer output stats - min: {out.min()}, max: {out.max()}, mean: {out.mean()}")
         return out
 
     def with_pos_embed(self, tensor, pos: Optional[Tensor]):
@@ -130,18 +130,18 @@ class TransformerDecoderLayer(nn.Module):
 
         # 初始检查
         if torch.isnan(tgt).any():
-            logger.error("NaN in tgt at start of forward_post")
+            logger.debug("NaN in tgt at start of forward_post")
 
         q = k = self.with_pos_embed(tgt, query_pos)
         # 检查位置编码后
         if torch.isnan(q).any():
-            logger.error("NaN in q after with_pos_embed")
+            logger.debug("NaN in q after with_pos_embed")
 
         tgt2 = self.self_attn(q, k, value=tgt, attn_mask=tgt_mask,
                               key_padding_mask=tgt_key_padding_mask)[0]
         # 检查自注意力后
         if torch.isnan(tgt2).any():
-            logger.error("NaN in tgt2 after self_attn")
+            logger.debug("NaN in tgt2 after self_attn")
 
         tgt = tgt + self.dropout1(tgt2)
         tgt = self.norm1(tgt)

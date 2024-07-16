@@ -1,23 +1,47 @@
+import math
 import os
 import pickle
 import argparse
-
+import numpy as np
 from PIL import Image, ImageDraw
 
 
-def draw_character_strokes(coordinates, image_size=(256, 256), scale_factor=1):
+def rotate_point(point, angle, center):
+    x, y = point
+    cx, cy = center
+    cos_theta = np.cos(angle)
+    sin_theta = np.sin(angle)
+    x_new = cx + (x - cx) * cos_theta - (y - cy) * sin_theta
+    y_new = cy + (x - cx) * sin_theta + (y - cy) * cos_theta
+    return x_new, y_new
+
+
+def draw_character_strokes(coordinates, image_size=(256, 256), scale_factor=1, noise=0.0):
     normalized_coordinates = normalize_coordinates(coordinates, image_size, scale_factor)
     images = {}
     for char, strokes in normalized_coordinates.items():
         if strokes is None or isinstance(strokes, str):
             continue
-
+        nums = int(100 * noise)
+        center = (image_size[0] / 2, image_size[1] / 2)
         image = Image.new('1', image_size, 1)  # 创建黑白图像
         draw = ImageDraw.Draw(image)
         for stroke in strokes:
             for i in range(len(stroke) - 1):
                 x1, y1, _, _ = stroke[i]
                 x2, y2, _, _ = stroke[i + 1]
+                temp1 = np.random.rand()
+                temp2 = np.random.rand()
+                if temp1 < noise:
+                    continue
+                if temp2 < noise:
+                    x1 += np.random.randint(-nums, nums)
+                    y1 += np.random.randint(-nums, nums)
+                    x2 += np.random.randint(-nums, nums)
+                    y2 += np.random.randint(-nums, nums)
+                rotation_angle = math.pi * noise * (2 * np.random.rand() - 1)
+                x1, y1 = rotate_point((x1, y1), rotation_angle, center)
+                x2, y2 = rotate_point((x2, y2), rotation_angle, center)
                 draw.line(
                     (x1, y1, x2, y2),
                     fill=0, width=2  # 使用黑色线条
@@ -68,7 +92,7 @@ def main(opt):
         os.makedirs(out_path)
     coor = pickle.load(open(opt.pkl, 'rb'))
     del coor['font_name']
-    images = draw_character_strokes(coor, scale_factor=opt.scale)
+    images = draw_character_strokes(coor, scale_factor=opt.scale, noise=opt.noise)
     for char, image in images.items():
         image.save(f"{out_path}/{char}.png")  # 保存图像
 
@@ -84,6 +108,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--out_path', default='coors_test_path', help='输出图片目录')
     parser.add_argument('--pkl', default='../ABtest/files/AB_coors/HYAlzheimer.pkl', help='读取文件')
-    parser.add_argument('--scale', default=0.27, type=int, help='图片缩放尺寸')
+    parser.add_argument('--scale', default=0.27, type=float, help='图片缩放尺寸')
+    parser.add_argument('--noise', default=0.05, type=float)
     opt = parser.parse_args()
     main(opt)

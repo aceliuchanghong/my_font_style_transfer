@@ -41,28 +41,29 @@ def write_pkl(file_path, file_name, imgs_path, show_pic_num=0):
     return img_list
 
 
-def process_png_dir(png_dir, char_pics_path, save_pkl_file_path):
-    print(png_dir)
-    imgs_file_list = get_files(os.path.join(char_pics_path, png_dir), get_suffix)
-    save_pkl_file_name = png_dir + '.pkl'
+def process_png_dir(png_dir_name, char_pics_path, save_pkl_file_path, get_suffix):
+    print(png_dir_name)
+    imgs_file_list = get_files(os.path.join(char_pics_path, png_dir_name), get_suffix)
+    save_pkl_file_name = png_dir_name + '.pkl'
     write_pkl(save_pkl_file_path, save_pkl_file_name, imgs_file_list, 0)
+    return save_pkl_file_path + "/" + save_pkl_file_name
 
-
-# char_pics_path = r'D:\soft\FontForgeBuilds\LCH_pics\00'
-char_pics_path = '/mnt/data/llch/Chinese-Fonts-Dataset/lch_pics'
-get_suffix = '.png'
-save_pkl_file_path = 'lch_pics_pkl'
-if not os.path.exists(save_pkl_file_path):
-    os.makedirs(save_pkl_file_path)
 
 if __name__ == '__main__':
+    # char_pics_path = r'D:\soft\FontForgeBuilds\LCH_pics\00'
+    char_pics_path = '/mnt/data/llch/Chinese-Fonts-Dataset/lch_pics'
+    get_suffix = '.png'
+    save_pkl_file_path = 'lch_pics_pkl'
+    if not os.path.exists(save_pkl_file_path):
+        os.makedirs(save_pkl_file_path)
     """
     将所有字体转png后==>存储文字的图像
     """
     # 获取文件列表
     png_dirs = os.listdir(char_pics_path)
     with concurrent.futures.ThreadPoolExecutor() as executor:
-        futures = [executor.submit(process_png_dir, png_dir, char_pics_path, save_pkl_file_path) for png_dir in
+        futures = [executor.submit(process_png_dir, png_dir, char_pics_path, save_pkl_file_path, get_suffix) for png_dir
+                   in
                    png_dirs]
         for future in concurrent.futures.as_completed(futures):
             try:

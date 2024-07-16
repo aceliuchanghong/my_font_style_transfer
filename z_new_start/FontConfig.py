@@ -8,6 +8,9 @@ new_start_config = {
         'save_model_dir': r'D:\aProject\py\my_font_style_transfer\z_new_start\save_model',
         'PER_BATCH': 8,
         'NUM_THREADS': 0,
+        'style_img_path': r'D:\aProject\py\my_font_style_transfer\style_samples',
+        'save_pkl_file_path': r'D:\aProject\py\my_font_style_transfer\Saved',
+        'suffix': '.png',
     },
     'dev': {
         'z_coordinate_pkl_path': '/mnt/data/llch/files/font_coor_test',
@@ -18,6 +21,9 @@ new_start_config = {
         'save_model_dir': '/mnt/data/llch/my_font_style_transfer/z_new_start/save_model',
         'PER_BATCH': 32,
         'NUM_THREADS': 8,
+        'style_img_path': '/mnt/data/llch/my_font_style_transfer/style_samples',
+        'save_pkl_file_path': '/mnt/data/llch/Saved',
+        'suffix': '.png',
     },
     'train': {
         'seed': 2024,
@@ -40,5 +46,5 @@ new_start_config = {
         'max_stroke': 20,
         'max_per_stroke_point': 200,
         'style_img_num': 12,
-    }
+    },
 }

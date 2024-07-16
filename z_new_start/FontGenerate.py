@@ -1,90 +1,145 @@
-import torch
+import argparse
+import logging
 import pickle
+import random
+import numpy as np
+import torch
+import sys
 import os
-from torch.utils.data import DataLoader
+
+# 获取项目根目录的绝对路径
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, project_root)
+
+from z_new_start.FontModel import FontModel
 from z_new_start.FontConfig import new_start_config
-from z_new_start.FontModel import FontModel  # 确保导入正确的模型类
-from z_new_start.z_utils import restore_coordinates
+from z_new_start.generate_utils.gen_char_img_pkl import get_files
+from utils.util import write_pkl
+
+# 设置日志
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
-def load_model(model_path, device, config):
+def fix_seed(random_seed):
+    random.seed(random_seed)
+    np.random.seed(random_seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    if torch.cuda.device_count() > 0 and torch.cuda.is_available():
+        torch.cuda.manual_seed_all(random_seed)
+    else:
+        torch.manual_seed(random_seed)
+
+
+def main(opt):
+    conf = new_start_config
+    train_conf = conf['train']
+    if opt.dev:
+        data_conf = conf['dev']
+    else:
+        data_conf = conf['test']
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    # 禁用 cuDNN autotuner
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
+    # 强制禁用 cuDNN 后端
+    torch.backends.cudnn.enabled = False
+    fix_seed(train_conf['seed'])
+    logger.info(f"seed: {train_conf['seed']}")
+
+    img_path_list = get_files(data_conf['style_img_path'], data_conf['suffix'])
+    style_samples = write_pkl(data_conf['save_pkl_file_path'], 'generate.pkl', img_path_list)
+    coors_std = pickle.load(open(data_conf['coors_pkl_path'], 'rb'))
+    img_std = pickle.load(open(data_conf['content_pkl_path'], 'rb'))
+
+    bs, nums, batch_data = 1, 12, []
+    for i, img in enumerate(style_samples):
+        if i >= nums:
+            break
+        img = img['img'] / 255.0
+        char_img_tensor = torch.tensor(img, dtype=torch.float32).unsqueeze(0)
+        batch_data.append(char_img_tensor)
+    image = torch.stack([item for item in batch_data]).unsqueeze(0)
+    logger.info(f'image:{image.shape}')
+
+    del coors_std['font_name']
+    batch_coors_std = []
+    for i, coor in enumerate(coors_std):
+        if i >= nums:
+            break
+        std_coors_tensor = torch.zeros((20, 200, 4), dtype=torch.float32)
+        for m, stroke in enumerate(list(coors_std.values())[i]):
+            if m >= 20:
+                break
+            for n, point in enumerate(stroke):
+                if n >= 200:
+                    break
+                std_coors_tensor[m, n] = torch.tensor(point, dtype=torch.float32)
+        batch_coors_std.append(std_coors_tensor)
+    coors_std = torch.stack([item for item in batch_coors_std])
+    logger.info(f'coors_std:{coors_std.shape}')
+
+    img_std_list = []
+    for i, img in enumerate(img_std):
+        if i >= nums:
+            break
+        img = img['img'] / 255.0
+        char_img_tensor = torch.tensor(img, dtype=torch.float32).unsqueeze(0)
+        img_std_list.append(char_img_tensor)
+    char_img_gt = torch.stack([item for item in img_std_list])
+    logger.info(f'char_img_gt:{char_img_gt.shape}')
+
     model = FontModel(
-        d_model=config['d_model'],
-        num_head=config['num_head'],
-        num_encoder_layers=config['num_encoder_layers'],
-        num_glyph_encoder_layers=config['num_glyph_encoder_layers'],
-        num_gly_decoder_layers=config['num_gly_decoder_layers'],
-        dim_feedforward=config['dim_feedforward'],
-        dropout=config['dropout'],
+        d_model=train_conf['d_model'],
+        num_head=train_conf['num_head'],
+        num_encoder_layers=train_conf['num_encoder_layers'],
+        num_glyph_encoder_layers=train_conf['num_glyph_encoder_layers'],
+        num_gly_decoder_layers=train_conf['num_gly_decoder_layers'],
+        dim_feedforward=train_conf['dim_feedforward'],
+        dropout=train_conf['dropout'],
         activation="relu",
         normalize_before=True,
         return_intermediate_dec=True,
+        train_conf=train_conf,
     )
-    model.load_state_dict(torch.load(model_path, map_location=device)['model_state_dict'])
+    if torch.cuda.device_count() > 1:
+        logger.info(f"Using {torch.cuda.device_count()} GPUs")
+        model = torch.nn.DataParallel(model)
+    elif torch.cuda.is_available():
+        logger.info("Using single GPU")
+    else:
+        logger.info("Using CPU")
+
+    if len(opt.pretrained_model) > 0:
+        state_dict = torch.load(opt.pretrained_model)
+        if isinstance(model, torch.nn.DataParallel):
+            model.module.load_state_dict(state_dict)
+        else:
+            pass
+            # model.load_state_dict(state_dict)
+        logger.info('loaded pretrained model from {}'.format(opt.pretrained_model))
     model.to(device)
     model.eval()
-    return model
 
-
-def preprocess_input(image_path, coordinate_path, config):
-    with open(image_path, 'rb') as f:
-        image_data = pickle.load(f)
-    with open(coordinate_path, 'rb') as f:
-        coordinate_data = pickle.load(f)
-
-    char_img = image_data['img'] / 255.0  # 正则化
-    char_img_tensor = torch.tensor(char_img, dtype=torch.float32).unsqueeze(0).unsqueeze(0)  # 添加批次和通道维度
-
-    padded_coors = torch.zeros((config['max_stroke'], config['max_per_stroke_point'], 4), dtype=torch.float32)
-    for i, stroke in enumerate(coordinate_data['coordinates']):
-        if i >= config['max_stroke']:
-            break
-        for j, point in enumerate(stroke):
-            if j >= config['max_per_stroke_point']:
-                break
-            padded_coors[i, j] = torch.tensor(point, dtype=torch.float32)
-    padded_coors_tensor = padded_coors.unsqueeze(0)  # 添加批次维度
-
-    same_style_img_list = [image_data['img'] / 255.0 for _ in range(config['num_img'])]
-    same_style_img_tensor = torch.tensor(same_style_img_list, dtype=torch.float32).unsqueeze(1).unsqueeze(
-        0)  # 添加批次和通道维度
-
-    return char_img_tensor, padded_coors_tensor, same_style_img_tensor
-
-
-def generate_coordinates(model, char_img_tensor, padded_coors_tensor, same_style_img_tensor, device, config):
-    char_img_tensor = char_img_tensor.to(device)
-    padded_coors_tensor = padded_coors_tensor.to(device)
-    same_style_img_tensor = same_style_img_tensor.to(device)
-
-    with torch.no_grad():
-        pred_sequence = model(same_style_img_tensor, padded_coors_tensor, char_img_tensor)
-
-    pred_coordinates = pred_sequence.cpu().numpy().squeeze()
-
-    restored_coordinates = restore_coordinates(torch.tensor(pred_coordinates), config['max_stroke'],
-                                               config['max_per_stroke_point'])
-    return restored_coordinates
+    logger.info(f"start generating...")
+    # with torch.no_grad():
+    #     pred_sequence = model(image, std_coors, char_img_gt)
+    #     pred_sequence = pred_sequence.cpu().numpy()
+    pred_sequence = 0
+    return pred_sequence
 
 
 if __name__ == '__main__':
-    # 配置和路径
-    conf = new_start_config
-    data_conf = conf['dev'] if os.getenv('ENV') == 'dev' else conf['test']
-    model_path = 'path/to/pretrained_model.pt'
-    image_path = 'path/to/image_data.pkl'
-    coordinate_path = 'path/to/coordinate_data.pkl'
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-
-    # 加载模型
-    model = load_model(model_path, device, conf['train'])
-
-    # 预处理输入数据
-    char_img_tensor, padded_coors_tensor, same_style_img_tensor = preprocess_input(image_path, coordinate_path,
-                                                                                   conf['train'])
-
-    # 生成坐标
-    generated_coordinates = generate_coordinates(model, char_img_tensor, padded_coors_tensor, same_style_img_tensor,
-                                                 device, conf['train'])
-
-    print(generated_coordinates)
+    """
+    python z_new_start/FontGenerate.py
+    python z_new_start/FontGenerate.py --dev
+    python z_new_start/FontGenerate.py --pretrained_model xx/xx.pth --dev
+    """
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--pretrained_model',
+                        default=r'D:\aProject\py\my_font_style_transfer\z_new_start\save_model\best_model.pt',
+                        help='pre-trained model')
+    parser.add_argument('--dev', action='store_true', help='加--dev则opt.dev=True为生产环境')
+    opt = parser.parse_args()
+    main(opt)
