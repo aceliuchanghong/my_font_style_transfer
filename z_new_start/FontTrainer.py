@@ -141,13 +141,14 @@ class FontTrainer:
                 os.remove(os.path.join(self.data_conf['save_model_dir'], old_checkpoint))
 
     def _save_best_model(self, step, loss):
-        best_model_path = os.path.join(self.data_conf['save_model_dir'], 'best_model.pt')
-        model_state_dict = self.model.module.state_dict() if isinstance(self.model,
-                                                                        torch.nn.DataParallel) else self.model.state_dict()
-        torch.save({
-            'step': step,
-            'model_state_dict': model_state_dict,
-            'optimizer_state_dict': self.optimizer.state_dict(),
-            'loss': loss
-        }, best_model_path)
-        logger.info(f"Best model saved at step {step} with validation loss {loss:.4f} to {best_model_path}")
+        if step >= self.train_conf['SNAPSHOT_BEGIN'] and step % self.train_conf['SNAPSHOT_EPOCH'] == 0:
+            best_model_path = os.path.join(self.data_conf['save_model_dir'], 'best_model.pt')
+            model_state_dict = self.model.module.state_dict() if isinstance(self.model,
+                                                                            torch.nn.DataParallel) else self.model.state_dict()
+            torch.save({
+                'step': step,
+                'model_state_dict': model_state_dict,
+                'optimizer_state_dict': self.optimizer.state_dict(),
+                'loss': loss
+            }, best_model_path)
+            logger.info(f"Best model saved at step {step} with validation loss {loss:.4f} to {best_model_path}")

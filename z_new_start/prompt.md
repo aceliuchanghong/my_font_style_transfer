@@ -3554,6 +3554,59 @@ attn_mask 或 key_padding_mask 问题：attn_mask 或 key_padding_mask 可能包
 
 ---
  
+```python
+model = FontModel(
+    d_model=train_conf['d_model'],
+    num_head=train_conf['num_head'],
+    num_encoder_layers=train_conf['num_encoder_layers'],
+    num_glyph_encoder_layers=train_conf['num_glyph_encoder_layers'],
+    num_gly_decoder_layers=train_conf['num_gly_decoder_layers'],
+    dim_feedforward=train_conf['dim_feedforward'],
+    dropout=train_conf['dropout'],
+    activation="relu",
+    normalize_before=True,
+    return_intermediate_dec=True,
+    train_conf=train_conf,
+)
+if torch.cuda.device_count() > 1:
+    logger.info(f"Using {torch.cuda.device_count()} GPUs")
+    model = torch.nn.DataParallel(model)
+elif torch.cuda.is_available():
+    logger.info("Using single GPU")
+else:
+    logger.info("Using CPU")
+model.to(device)
+```
+这个似乎是平均分在多个gpu上面训练,假设我有4个gpu,每个32G,训练的时候GPU-MEM大概2000MiB,但是第一个gpu卡有其他服务在执行,有没有办法不平均分配呢
+
+---
+
+```python
+self.scaler.scale(loss).backward()
+# 增加梯度累加
+if (step + 1) % self.accumulation_steps == 0:
+    self.scaler.unscale_(self.optimizer)
+    torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)  # 梯度裁剪
+    self.scaler.step(self.optimizer)
+    self.scaler.update()
+    self.optimizer.zero_grad()
+```
+```python
+self.model.zero_grad()
+loss.backward()
+```
+哪个是对的,一个先lossback,一个先zero_grad
+
+ans:
+代码使用了以下：
+混合精度训练（通过 scaler）
+梯度累积（通过 accumulation_steps）
+梯度裁剪
+梯度缩放和反缩放
+在这种情况下，zero_grad() 在优化器步骤之后调用，这是因为梯度正在累积。只有在累积了预定数量的步骤后，才会更新参数并清零梯度
+
+---
+
 
 
 ---
@@ -3599,4 +3652,93 @@ attn_mask 或 key_padding_mask 问题：attn_mask 或 key_padding_mask 可能包
 
 
 ---
+---
+ 
 
+
+---
+---
+ 
+
+
+---
+---
+ 
+
+
+---
+---
+ 
+
+
+---
+---
+ 
+
+
+---
+---
+ 
+
+
+---
+---
+ 
+
+
+---
+---
+ 
+
+
+---
+---
+ 
+
+
+---
+---
+ 
+
+
+---
+---
+ 
+
+
+---
+---
+ 
+
+
+---
+---
+ 
+
+
+---
+---
+ 
+
+
+---
+---
+ 
+
+
+---
+---
+ 
+
+
+---
+---
+ 
+
+
+---
+---
+ 
+
+
+---

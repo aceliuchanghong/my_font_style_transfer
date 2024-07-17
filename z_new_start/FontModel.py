@@ -36,9 +36,9 @@ class FontModel(nn.Module):
         self.encoder_layer = TransformerEncoderLayer(
             d_model, num_head, dim_feedforward, dropout, activation, normalize_before
         )
-        self.base_encoder = self._build_base_encoder(
-            num_encoder_layers
-        )
+        # self.base_encoder = self._build_base_encoder(
+        #     num_encoder_layers
+        # )
         self.glyph_encoder = self._build_glyph_encoder(
             d_model, normalize_before, num_glyph_encoder_layers
         )
@@ -166,8 +166,9 @@ class FontModel(nn.Module):
         feat = feat.view(batch_size * num_img, 512, -1).permute(2, 0, 1)
         logger.debug(f"feat shape after view and permute: {feat.shape}")
         feat = self.add_position(feat)
-        feat = self.base_encoder(feat)
-        logger.debug(f"feat shape after add_position and base_encoder: {feat.shape}")
+        logger.debug(f"feat shape after add_position: {feat.shape}")
+        # feat = self.base_encoder(feat)
+        # logger.info(f"feat shape after base_encoder: {feat.shape}")
 
         # [b] 处理和重组特征
         glyph_feat = self.glyph_encoder(feat)
