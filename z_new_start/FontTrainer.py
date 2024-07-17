@@ -22,7 +22,7 @@ class FontTrainer:
         self.data_conf = data_conf
         self.best_loss = float('inf')
         self.scaler = torch.cuda.amp.GradScaler()
-        self.accumulation_steps = 32  # 累积梯度的步数
+        self.accumulation_steps = 16  # 累积梯度的步数
 
     def train(self):
         num_epochs = self.train_conf['num_epochs']
@@ -33,7 +33,7 @@ class FontTrainer:
         total_steps = num_epochs * len(self.train_loader) if num_epochs * len(
             self.train_loader) <= max_steps else max_steps
         pbar = tqdm(total=total_steps, desc="Training Progress")
-        logger.info(f"Start training epochs: {total_steps / len(self.train_loader)}")
+        logger.info(f"Start training epochs: {int(total_steps / len(self.train_loader))}")
 
         for epoch in range(num_epochs):
             train_loader_iter = iter(self.train_loader)
@@ -89,7 +89,7 @@ class FontTrainer:
                 raise ValueError("Loss is NaN")
             loss = loss / self.accumulation_steps
 
-        logger.debug(f"Step {step}, Loss: {loss.item()}")
+        logger.info(f"Step {step}, Loss: {loss.item()}")
         self.scaler.scale(loss).backward()
         # 增加梯度累加
         if (step + 1) % self.accumulation_steps == 0:

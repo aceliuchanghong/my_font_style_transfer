@@ -3527,6 +3527,31 @@ font_hs[-1] 将返回一个形状为 [4001, 4, 512] 的张量
 
 ---
 
+执行
+```python
+print(q.shape,k.shape,tgt.shape,tgt_mask.shape)
+tgt2 = self.self_attn(q, k, value=tgt, attn_mask=tgt_mask,
+                      key_padding_mask=tgt_key_padding_mask)[0]
+if torch.isnan(tgt2).any():
+    logger.info(f"NaN in tgt2 after self_attn,shape:{tgt2.shape}")
+```
+报错:
+torch.Size([4001, 1, 512]) torch.Size([4001, 1, 512]) torch.Size([4001, 1, 512]) torch.Size([4001, 4001])
+INFO:z_new_start.FontTransformer:NaN in tgt2 after self_attn,shape:torch.Size([4001, 1, 512])
+其中:
+self.self_attn = nn.MultiheadAttention(512, 8, dropout=0.1)
+为什么啊,怎么修改
+
+ans:
+输入数据范围问题：NaN 可能是由于输入数据（q, k, tgt 或 tgt_mask）中存在不合适的值（如非常大的值或 NaN）。
+可以在进入 self_attn 之前检查这些输入数据，确保它们没有异常值。
+Dropout 造成的 NaN：在极少数情况下，Dropout 层可能会导致 NaN。
+可以尝试将 Dropout 率降低或暂时禁用 Dropout 以检查是否是这个原因。
+浮点数精度问题：浮点数运算中如果数值范围过大，可能会引起溢出或下溢，从而导致 NaN。
+可以尝试对输入数据进行归一化处理，确保其在一个合理的范围内。
+attn_mask 或 key_padding_mask 问题：attn_mask 或 key_padding_mask 可能包含了不合适的值，
+导致注意力机制中的计算出现问题。确保这些 mask 值是正确的。
+
 ---
  
 

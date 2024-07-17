@@ -49,7 +49,7 @@ class FontModel(nn.Module):
 
         # decoder
         self.decoder_layer = TransformerDecoderLayer(
-            d_model, num_head, dim_feedforward, dropout, activation
+            d_model, num_head, dim_feedforward, dropout, activation, normalize_before
         )
         self.glyph_transformer_decoder = self._build_glyph_decoder(
             d_model, normalize_before, num_gly_decoder_layers, return_intermediate_dec

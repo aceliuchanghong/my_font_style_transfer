@@ -52,7 +52,7 @@ class TransformerDecoder(nn.Module):
                            pos=pos, query_pos=query_pos)
             # if torch.isnan(output).any():
             #     logger.error(f"NaN values found in {str(i)}layer output")
-            logging.debug(f"{i} layer")
+            logger.debug(f"{i} layer")
             if self.return_intermediate:
                 intermediate.append(self.norm(output))
 
@@ -129,11 +129,9 @@ class TransformerDecoderLayer(nn.Module):
                      memory_key_padding_mask: Optional[Tensor] = None,
                      pos: Optional[Tensor] = None,
                      query_pos: Optional[Tensor] = None):
-
         # 初始检查
         if torch.isnan(tgt).any():
             logger.debug("NaN in tgt at start of forward_post")
-
         q = k = self.with_pos_embed(tgt, query_pos)
         # 检查位置编码后
         if torch.isnan(q).any():
