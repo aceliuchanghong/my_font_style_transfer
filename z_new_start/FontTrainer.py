@@ -89,7 +89,7 @@ class FontTrainer:
                 raise ValueError("Loss is NaN")
             loss = loss / self.accumulation_steps
 
-        logger.info(f"Step {step}, Loss: {loss.item()}")
+        logger.debug(f"Step {step}, Loss: {loss.item()}")
         self.scaler.scale(loss).backward()
         # 增加梯度累加
         if (step + 1) % self.accumulation_steps == 0:

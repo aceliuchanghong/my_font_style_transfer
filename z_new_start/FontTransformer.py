@@ -16,7 +16,7 @@ class TransformerDecoder(nn.Module):
                  decoder_layer,
                  num_layers,
                  norm=None,
-                 return_intermediate=False):
+                 return_intermediate=True):
         super().__init__()
         self.layers = _get_clone(decoder_layer, num_layers)
         self.num_layers = num_layers
@@ -39,6 +39,8 @@ class TransformerDecoder(nn.Module):
                 pos: Optional[Tensor] = None,
                 query_pos: Optional[Tensor] = None):
         output = tgt
+        if torch.isnan(output).any():
+            logger.debug("NaN values found in tgt start Decoder")
 
         intermediate = []
 
@@ -136,12 +138,11 @@ class TransformerDecoderLayer(nn.Module):
         # 检查位置编码后
         if torch.isnan(q).any():
             logger.debug("NaN in q after with_pos_embed")
-
+        # print(q.shape,k.shape,tgt.shape,tgt_mask.shape)
         tgt2 = self.self_attn(q, k, value=tgt, attn_mask=tgt_mask,
                               key_padding_mask=tgt_key_padding_mask)[0]
-        # 检查自注意力后
         if torch.isnan(tgt2).any():
-            logger.debug("NaN in tgt2 after self_attn")
+            logger.debug(f"NaN in tgt2 after self_attn,shape:{tgt2.shape}")
 
         tgt = tgt + self.dropout1(tgt2)
         tgt = self.norm1(tgt)

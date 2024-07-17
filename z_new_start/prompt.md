@@ -3197,21 +3197,333 @@ char_emb的形状是怎么变化的?
 
 ---
 
+
+```python
+self.font_transformer_decoder = self._build_font_decoder(
+    d_model, num_head, dim_feedforward, dropout, activation, num_gly_decoder_layers
+)
+def _build_font_decoder(self, d_model, num_head, dim_feedforward, dropout, activation, num_gly_decoder_layers):
+    font_decoder_layers = TransformerDecoderLayer(
+        d_model, num_head, dim_feedforward, dropout, activation
+    )
+    return TransformerDecoder(font_decoder_layers, num_gly_decoder_layers)
+```
+```python
+class TransformerDecoder(nn.Module):
+    def __init__(self,
+                 decoder_layer,
+                 num_layers,
+                 norm=None,
+                 return_intermediate=False):
+        super().__init__()
+        self.layers = _get_clone(decoder_layer, num_layers)
+        self.num_layers = num_layers
+        self.norm = norm
+        self.return_intermediate = return_intermediate
+
+    def forward(self, tgt, memory,
+                tgt_mask: Optional[Tensor] = None,
+                memory_mask: Optional[Tensor] = None,
+                tgt_key_padding_mask: Optional[Tensor] = None,
+                memory_key_padding_mask: Optional[Tensor] = None,
+                pos: Optional[Tensor] = None,
+                query_pos: Optional[Tensor] = None):
+        output = tgt
+        intermediate = []
+        for i, layer in enumerate(self.layers):
+            output = layer(output, memory, tgt_mask=tgt_mask,
+                           memory_mask=memory_mask,
+                           tgt_key_padding_mask=tgt_key_padding_mask,
+                           memory_key_padding_mask=memory_key_padding_mask,
+                           pos=pos, query_pos=query_pos)
+            # if torch.isnan(output).any():
+            #     logger.error(f"NaN values found in {str(i)}layer output")
+            logging.debug(f"{i} layer")
+            if self.return_intermediate:
+                intermediate.append(self.norm(output))
+
+        if self.norm is not None:
+            output = self.norm(output)
+            if self.return_intermediate:
+                intermediate.pop()
+                intermediate.append(output)
+
+        if self.return_intermediate:
+            return torch.stack(intermediate)
+
+        return output.unsqueeze(0)
+
+class TransformerDecoderLayer(nn.Module):
+
+    def __init__(self,
+                 d_model,
+                 nhead,
+                 dim_feedforward=2048,
+                 dropout=0.1,
+                 activation="relu",
+                 normalize_before=False):
+        super().__init__()
+        self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
+        self.multihead_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
+        self.linear1 = nn.Linear(d_model, dim_feedforward)
+        self.dropout = nn.Dropout(dropout)
+        self.linear2 = nn.Linear(dim_feedforward, d_model)
+
+        self.norm1 = nn.LayerNorm(d_model)
+        self.norm2 = nn.LayerNorm(d_model)
+        self.norm3 = nn.LayerNorm(d_model)
+        self.dropout1 = nn.Dropout(dropout)
+        self.dropout2 = nn.Dropout(dropout)
+        self.dropout3 = nn.Dropout(dropout)
+
+        self.activation = _get_activation_func(activation)
+        self.normalize_before = normalize_before
+
+    def forward(self, tgt, memory,
+                tgt_mask: Optional[Tensor] = None,
+                memory_mask: Optional[Tensor] = None,
+                tgt_key_padding_mask: Optional[Tensor] = None,
+                memory_key_padding_mask: Optional[Tensor] = None,
+                pos: Optional[Tensor] = None,
+                query_pos: Optional[Tensor] = None):
+        for name, tensor in [('tgt', tgt), ('memory', memory), ('tgt_mask', tgt_mask),
+                             ('memory_mask', memory_mask), ('tgt_key_padding_mask', tgt_key_padding_mask),
+                             ('memory_key_padding_mask', memory_key_padding_mask),
+                             ('pos', pos), ('query_pos', query_pos)]:
+            if tensor is not None and torch.isnan(tensor).any():
+                logger.debug(f"NaN found in {name} at start of TransformerDecoderLayer.forward")
+            out = self.forward_post(tgt, memory, tgt_mask, memory_mask,
+                                    tgt_key_padding_mask, memory_key_padding_mask, pos, query_pos)
+
+        if torch.isnan(out).any():
+            logger.debug("NaN values found in TransformerDecoderLayer output")
+            logger.debug(f"Layer output stats - min: {out.min()}, max: {out.max()}, mean: {out.mean()}")
+        return out
+    def forward_post(self, tgt, memory,
+                     tgt_mask: Optional[Tensor] = None,
+                     memory_mask: Optional[Tensor] = None,
+                     tgt_key_padding_mask: Optional[Tensor] = None,
+                     memory_key_padding_mask: Optional[Tensor] = None,
+                     pos: Optional[Tensor] = None,
+                     query_pos: Optional[Tensor] = None):
+
+        # 初始检查
+        if torch.isnan(tgt).any():
+            logger.debug("NaN in tgt at start of forward_post")
+
+        q = k = self.with_pos_embed(tgt, query_pos)
+        # 检查位置编码后
+        if torch.isnan(q).any():
+            logger.debug("NaN in q after with_pos_embed")
+
+        tgt2 = self.self_attn(q, k, value=tgt, attn_mask=tgt_mask,
+                              key_padding_mask=tgt_key_padding_mask)[0]
+        # 检查自注意力后
+        if torch.isnan(tgt2).any():
+            logger.debug("NaN in tgt2 after self_attn")
+
+        tgt = tgt + self.dropout1(tgt2)
+        tgt = self.norm1(tgt)
+        tgt2 = self.multihead_attn(query=self.with_pos_embed(tgt, query_pos),
+                                   key=self.with_pos_embed(memory, pos),
+                                   value=memory, attn_mask=memory_mask,
+                                   key_padding_mask=memory_key_padding_mask)[0]
+        tgt = tgt + self.dropout2(tgt2)
+        tgt = self.norm2(tgt)
+        tgt2 = self.linear2(self.dropout(self.activation(self.linear1(tgt))))
+        tgt = tgt + self.dropout3(tgt2)
+        tgt = self.norm3(tgt)
+        return tgt
+
+def _get_clone(module, N):
+    return nn.ModuleList([copy.deepcopy(module) for i in range(N)])
+
+```
+font_hs = self.font_transformer_decoder(tgt, font_style, tgt_mask=tgt_mask)
+tgt:torch.Size([4001, 4, 512])
+font_style:torch.Size([24, 4, 512])
+tgt_mask:torch.Size([4001, 4, 512])
+那么
+1.font_hs的shape是什么呢?帮我给出其变化
+2.如果font_hs contains NaN or Inf values,正常吗?
+
+---
+
+```python
+self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
+tgt2 = self.self_attn(q, k, value=tgt, attn_mask=tgt_mask,
+                      key_padding_mask=tgt_key_padding_mask)[0]
+# 检查自注意力后
+if torch.isnan(tgt2).any():
+    logger.debug("NaN in tgt2 after self_attn")
+```
+print(q.shape,k.shape,tgt.shape,tgt_mask.shape)
+输出:
+torch.Size([4001, 4, 512]) torch.Size([4001, 4, 512]) torch.Size([4001, 4, 512]) torch.Size([4001, 4001])
+NaN in tgt2 after self_attn
+其中tgt_mask类似:
+[[0, inf, inf...],
+    [0, 0, inf...],
+    [0, 0, 0]...]....
+怎么回事呢?
+
+---
+
+char_emb, seq_emb 的形状为 [4000,B,512] , [1, B, 512]
+tgt = torch.cat((char_emb, seq_emb), 0)
+tgt呢?
+
+---
+
+这个什么意思? to(tgt)
+tgt_mask = generate_square_subsequent_mask(sz=(T + 1)).to(tgt)
+
+```python
+def generate_square_subsequent_mask(sz: int) -> Tensor:
+    mask = (torch.triu(torch.ones(sz, sz)) == 1).transpose(0, 1)
+    mask = (
+        mask
+        .float()
+        .masked_fill(mask == 0, float('-inf'))
+        .masked_fill(mask == 1, float(0.0))
+    )
+    return mask
+```
+
+---
+
+```python
+class FontModel(nn.Module):
+    def __init__(self,
+                 d_model=512,
+                 num_head=8,
+                 num_encoder_layers=2,
+                 num_glyph_encoder_layers=2,
+                 num_gly_decoder_layers=2,
+                 dim_feedforward=2048,  # 前馈神经网络中隐藏层的大小
+                 dropout=0.2,
+                 activation="relu",
+                 # activation = "gelu",
+                 normalize_before=True,  # 应用多头注意力和前馈神经网络之前是否对输入进行层归一化
+                 return_intermediate_dec=True,  # 是否在解码过程中返回中间结果
+                 train_conf=None
+                 ):
+        super(FontModel, self).__init__()
+        self.train_conf = train_conf
+
+        # encoder
+        self.feat_encoder = self._build_feature_encoder()
+        self.encoder_layer = TransformerEncoderLayer(
+            d_model, num_head, dim_feedforward, dropout, activation, normalize_before
+        )
+        self.base_encoder = self._build_base_encoder(
+            num_encoder_layers
+        )
+        self.glyph_encoder = self._build_glyph_encoder(
+            d_model, normalize_before, num_glyph_encoder_layers
+        )
+        self.font_encoder = self._build_font_encoder(
+            d_model, normalize_before, num_glyph_encoder_layers
+        )
+        self.content_encoder = Content_TR(d_model=d_model, num_encoder_layers=num_encoder_layers)
+
+        # decoder
+        self.decoder_layer = TransformerDecoderLayer(
+            d_model, num_head, dim_feedforward, dropout, activation
+        )
+        self.glyph_transformer_decoder = self._build_glyph_decoder(
+            d_model, normalize_before, num_gly_decoder_layers, return_intermediate_dec
+        )
+        self.font_transformer_decoder = self._build_font_decoder(
+            d_model, normalize_before, num_gly_decoder_layers, return_intermediate_dec
+        )
+
+        # other
+        # self.pro_mlp_font = nn.Sequential(
+        #     nn.Linear(512, 4096),
+        #     nn.ReLU(),
+        #     nn.Linear(4096, 256)
+        # )
+        # self.pro_mlp_glyph = nn.Sequential(
+        #     nn.Linear(512, 4096),
+        #     nn.ReLU(),
+        #     nn.Linear(4096, 256)
+        # )
+
+        self.SeqtoEmb = Seq2Emb(output_dim=d_model)
+        self.EmbtoSeq = Emb2Seq(input_dim=d_model)
+        self.add_position = PositionalEncoding(dim=d_model, dropout=0.1)
+        # 参数重置 用于初始化模型的参数
+        self._init_parameters()
+
+    def _build_feature_encoder(self):
+        # 图像的特征提取卷积层
+        # 此处使用一个卷积层和一个预训练的 ResNet-18 模型的特征提取器
+        # *() 将列表中的元素作为多个参数传递给 nn.Sequential，而不是将整个列表作为一个参数
+        # Downloading: "https://download.pytorch.org/models/resnet18-f37072fd.pth" to C:/Users/liuch/.cache/torch/hub/checkpoints/resnet18-f37072fd.pth
+        return nn.Sequential(*(  # 一个输入通道，输出64个通道。卷积核大小为7，步长为2，填充为3。bias=False不使用偏置项
+                [nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)]
+                +
+                # 获取了 ResNet-18 模型的子模块列表，然后去掉了列表的第一个和最后两个模块。
+                # 这些被去掉的模块通常是 ResNet-18 模型的头部，包括全局平均池化层和全连接层。
+                list(models.resnet18(weights=ResNet18_Weights.IMAGENET1K_V1).children())[1:-2]
+        ))
+
+    # Transformer 编码器
+    def _build_base_encoder(self, num_encoder_layers):
+        return TransformerEncoder(self.encoder_layer, num_encoder_layers)
+
+    def _build_glyph_encoder(self, d_model, normalize_before, num_glyph_encoder_layers):
+        glyph_norm = nn.LayerNorm(d_model) if normalize_before else None
+        return TransformerEncoder(self.encoder_layer, num_glyph_encoder_layers, glyph_norm)
+
+    def _build_font_encoder(self, d_model, normalize_before, num_glyph_encoder_layers):
+        font_norm = nn.LayerNorm(d_model) if normalize_before else None
+        return TransformerEncoder(self.encoder_layer, num_glyph_encoder_layers, font_norm)
+
+    def _build_glyph_decoder(self, d_model, normalize_before, num_gly_decoder_layers, return_intermediate_dec):
+        gly_decoder_norm = nn.LayerNorm(d_model) if normalize_before else None
+        return TransformerDecoder(self.decoder_layer, num_gly_decoder_layers, gly_decoder_norm,
+                                  return_intermediate_dec)
+
+    def _build_font_decoder(self, d_model, normalize_before, num_gly_decoder_layers, return_intermediate_dec):
+        font_decoder_norm = nn.LayerNorm(d_model) if normalize_before else None
+        return TransformerDecoder(self.decoder_layer, num_gly_decoder_layers, font_decoder_norm,
+                                  return_intermediate_dec)
+
+    def _init_parameters(self):
+        for p in self.parameters():
+            """
+            如果参数的维度大于 1，则使用 Xavier 均匀初始化方法来初始化参数 p。
+            Xavier 初始化是一种常用的权重初始化方法，它确保前向传播和反向传播的信号在深度神经网络中保持平衡，
+            有助于加快训练速度和提高模型的性能。
+            总的来说，这段代码的作用是在模型中对所有二维参数（即权重矩阵）
+            使用 Xavier 均匀初始化方法进行初始化。这是一种常见的初始化策略，特别适用于深度学习模型。
+            """
+            if p.dim() > 1:
+                nn.init.xavier_uniform_(p)
+```
+使用公共的
+self.encoder_layer = TransformerEncoderLayer(
+            d_model, num_head, dim_feedforward, dropout, activation, normalize_before
+        )
+self.decoder_layer = TransformerDecoderLayer(
+            d_model, num_head, dim_feedforward, dropout, activation
+        )
+会减少参数量,或者减少计算吗?
+
+ans:
+虽然重用这些层定义看起来会减少代码量，但它不会减少模型的参数量或计算量
+
 ---
  
+font_hs shape: torch.Size([2, 4001, 4, 512])
+font_hs[-1]是什么意思?
 
-
----
-
----
- 
-
-
----
-
----
- 
-
+ans:
+font_hs[-1] 表示取 font_hs 张量的最后一个元素。
+具体来说，font_hs 是一个形状为 [2, 4001, 4, 512] 的张量，
+font_hs[-1] 将返回一个形状为 [4001, 4, 512] 的张量
 
 ---
 
