@@ -22,7 +22,7 @@ class FontTrainer:
         self.data_conf = data_conf
         self.best_loss = float('inf')
         self.scaler = torch.cuda.amp.GradScaler()
-        self.accumulation_steps = 16  # 累积梯度的步数
+        self.accumulation_steps = 20  # 累积梯度的步数
 
     def train(self):
         num_epochs = self.train_conf['num_epochs']
@@ -45,7 +45,7 @@ class FontTrainer:
                         return
                     data = next(train_loader_iter)
                     self._train_iter(data, step)
-                    if (step + 1) % self.accumulation_steps == 0:
+                    if step % self.accumulation_steps == 0:
                         self._save_checkpoint(step)
                         val_loss = self._valid_iter(step)
                         if val_loss < self.best_loss:
@@ -89,17 +89,16 @@ class FontTrainer:
                 raise ValueError("Loss is NaN")
             loss = loss / self.accumulation_steps
 
-        logger.info(f"Step {step}, Loss: {loss.item()}")
+        logger.info(f"Step {step}, Loss: {loss.item() / 50}")
         self.scaler.scale(loss).backward()
         # 增加梯度累加
-        if (step + 1) % self.accumulation_steps == 0:
+        if step % self.accumulation_steps == 0:
             self.scaler.unscale_(self.optimizer)
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)  # 梯度裁剪
             self.scaler.step(self.optimizer)
             self.scaler.update()
             self.optimizer.zero_grad()
 
-        del data, predict, loss
         torch.cuda.empty_cache()
 
     def _valid_iter(self, step):
@@ -118,11 +117,11 @@ class FontTrainer:
                     total_loss += loss.item()
                 torch.cuda.empty_cache()
         avg_loss = total_loss / len(self.valid_loader)
-        logger.info(f"Validation loss at step {step}: {avg_loss:.4f}")
+        logger.info(f"Validation loss at step {step}: {avg_loss / 50:.4f}")
         return avg_loss
 
     def _save_checkpoint(self, step):
-        if step >= self.train_conf['SNAPSHOT_BEGIN'] and step % self.train_conf['SNAPSHOT_EPOCH'] == 0:
+        if step >= self.train_conf['SNAPSHOT_BEGIN'] and step % (self.train_conf['SNAPSHOT_EPOCH'] + 1) == 0:
             checkpoint_path = os.path.join(self.data_conf['save_model_dir'], f'checkpoint_step_{step}.pt')
             model_state_dict = self.model.module.state_dict() if isinstance(self.model,
                                                                             torch.nn.DataParallel) else self.model.state_dict()
@@ -141,7 +140,7 @@ class FontTrainer:
                 os.remove(os.path.join(self.data_conf['save_model_dir'], old_checkpoint))
 
     def _save_best_model(self, step, loss):
-        if step >= self.train_conf['SNAPSHOT_BEGIN'] and step % self.train_conf['SNAPSHOT_EPOCH'] == 0:
+        if step >= self.train_conf['SNAPSHOT_BEGIN'] and step % (self.train_conf['SNAPSHOT_EPOCH'] + 1) == 0:
             best_model_path = os.path.join(self.data_conf['save_model_dir'], 'best_model.pt')
             model_state_dict = self.model.module.state_dict() if isinstance(self.model,
                                                                             torch.nn.DataParallel) else self.model.state_dict()

@@ -89,6 +89,7 @@ class FontDataset(Dataset):
                     # print(e)
                     pass
         train_size = int(len(self.font_data) * train_percent)
+        random.shuffle(self.font_data)
         if is_train:
             self.font_data = self.font_data[:train_size]
         else:

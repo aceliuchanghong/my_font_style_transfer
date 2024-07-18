@@ -941,7 +941,7 @@ ScriptDataset的collate_fn_定义
     def collate_fn_(self, batch_data):
 
 
-    bs = len(batch_data)
+bs = len(batch_data)
 # 找到 batch 中最长的序列长度，并加1（因为需要在末尾填充一个结束状态）
 max_len = max([s['coords'].shape[0] for s in batch_data]) + 1
 output = {'coords': torch.zeros((bs, max_len, 5)),  # (batch_size, max_len, 5)的张量，表示每个样本的坐标和状态
@@ -1096,85 +1096,87 @@ class SDT_Generator(nn.Module):
 
 ```python
     def forward(self, style_imgs, seq, char_img):
-    # style_imgs 是风格图片的输入，seq 是序列输入，char_img 是字符图片输入。
-    # 风格图片的批次大小、图片数量、通道数、高度和宽度。
-    batch_size, num_imgs, in_planes, h, w = style_imgs.shape
 
-    # style_imgs: [B, 2*N, C:1, H, W] -> FEAT_ST_ENC: [4*N, B, C:512]
-    # -1是一个特殊的值，表示该维度的大小将通过其他维度的大小和总元素数自动推断出来
-    style_imgs = style_imgs.view(-1, in_planes, h, w)  # [B*2N, C:1, H, W]
-    style_embe = self.Feat_Encoder(style_imgs)  # [B*2N, C:512, 2, 2]
 
-    anchor_num = num_imgs // 2
-    style_embe = style_embe.view(batch_size * num_imgs, 512, -1).permute(2, 0,
-                                                                         1)  # [4, B*2N, C:512] permute,改变张量的维度顺序
-    FEAT_ST_ENC = self.add_position(style_embe)
+# style_imgs 是风格图片的输入，seq 是序列输入，char_img 是字符图片输入。
+# 风格图片的批次大小、图片数量、通道数、高度和宽度。
+batch_size, num_imgs, in_planes, h, w = style_imgs.shape
 
-    memory = self.base_encoder(FEAT_ST_ENC)  # [4, B*2N, C]
-    writer_memory = self.writer_head(memory)
-    glyph_memory = self.glyph_head(memory)
+# style_imgs: [B, 2*N, C:1, H, W] -> FEAT_ST_ENC: [4*N, B, C:512]
+# -1是一个特殊的值，表示该维度的大小将通过其他维度的大小和总元素数自动推断出来
+style_imgs = style_imgs.view(-1, in_planes, h, w)  # [B*2N, C:1, H, W]
+style_embe = self.Feat_Encoder(style_imgs)  # [B*2N, C:512, 2, 2]
 
-    writer_memory = rearrange(writer_memory, 't (b p n) c -> t (p b) n c',
-                              b=batch_size, p=2, n=anchor_num)  # [4, 2*B, N, C]
-    glyph_memory = rearrange(glyph_memory, 't (b p n) c -> t (p b) n c',
-                             b=batch_size, p=2, n=anchor_num)  # [4, 2*B, N, C]
+anchor_num = num_imgs // 2
+style_embe = style_embe.view(batch_size * num_imgs, 512, -1).permute(2, 0,
+                                                                     1)  # [4, B*2N, C:512] permute,改变张量的维度顺序
+FEAT_ST_ENC = self.add_position(style_embe)
 
-    # writer-nce
-    memory_fea = rearrange(writer_memory, 't b n c ->(t n) b c')  # [4*N, 2*B, C]
-    # 计算memory_fea张量在第0个维度上的平均值
-    compact_fea = torch.mean(memory_fea, 0)  # [2*B, C]
-    # compact_fea:[2*B, C:512] ->  nce_emb: [B, 2, C:128]
-    pro_emb = self.pro_mlp_writer(compact_fea)
-    query_emb = pro_emb[:batch_size, :]
-    pos_emb = pro_emb[batch_size:, :]
-    # 将两个嵌入向量（query_emb和pos_emb）沿着第二个维度（索引为1）堆叠起来，形成一个新的张量
-    nce_emb = torch.stack((query_emb, pos_emb), 1)  # [B, 2, C]
-    nce_emb = nn.functional.normalize(nce_emb, p=2, dim=2)
+memory = self.base_encoder(FEAT_ST_ENC)  # [4, B*2N, C]
+writer_memory = self.writer_head(memory)
+glyph_memory = self.glyph_head(memory)
 
-    # glyph-nce
-    patch_emb = glyph_memory[:, :batch_size]  # [4, B, N, C]
-    # sample the positive pair
-    anc, positive = self.random_double_sampling(patch_emb)
-    n_channels = anc.shape[-1]
-    # -1：这是一个特殊的值，表示该维度的大小由其他维度和总元素数量决定
-    anc = anc.reshape(batch_size, -1, n_channels)
-    # 如果anc是一个形状为(m, n)的二维张量，
-    # 那么torch.mean(anc, 1, keepdim=True)将返回一个形状为(m, 1)的二维张量，
-    # 其中每个元素是原始张量对应行的均值
-    anc_compact = torch.mean(anc, 1, keepdim=True)
-    anc_compact = self.pro_mlp_character(anc_compact)  # [B, 1, C]
-    positive = positive.reshape(batch_size, -1, n_channels)
-    positive_compact = torch.mean(positive, 1, keepdim=True)
-    positive_compact = self.pro_mlp_character(positive_compact)  # [B, 1, C]
+writer_memory = rearrange(writer_memory, 't (b p n) c -> t (p b) n c',
+                          b=batch_size, p=2, n=anchor_num)  # [4, 2*B, N, C]
+glyph_memory = rearrange(glyph_memory, 't (b p n) c -> t (p b) n c',
+                         b=batch_size, p=2, n=anchor_num)  # [4, 2*B, N, C]
 
-    nce_emb_patch = torch.cat((anc_compact, positive_compact), 1)  # [B, 2, C]
-    nce_emb_patch = nn.functional.normalize(nce_emb_patch, p=2, dim=2)
+# writer-nce
+memory_fea = rearrange(writer_memory, 't b n c ->(t n) b c')  # [4*N, 2*B, C]
+# 计算memory_fea张量在第0个维度上的平均值
+compact_fea = torch.mean(memory_fea, 0)  # [2*B, C]
+# compact_fea:[2*B, C:512] ->  nce_emb: [B, 2, C:128]
+pro_emb = self.pro_mlp_writer(compact_fea)
+query_emb = pro_emb[:batch_size, :]
+pos_emb = pro_emb[batch_size:, :]
+# 将两个嵌入向量（query_emb和pos_emb）沿着第二个维度（索引为1）堆叠起来，形成一个新的张量
+nce_emb = torch.stack((query_emb, pos_emb), 1)  # [B, 2, C]
+nce_emb = nn.functional.normalize(nce_emb, p=2, dim=2)
 
-    # input the writer-wise & character-wise styles into the decoder
-    writer_style = memory_fea[:, :batch_size, :]  # [4*N, B, C]
-    glyph_style = glyph_memory[:, :batch_size]  # [4, B, N, C]
-    glyph_style = rearrange(glyph_style, 't b n c -> (t n) b c')  # [4*N, B, C]
+# glyph-nce
+patch_emb = glyph_memory[:, :batch_size]  # [4, B, N, C]
+# sample the positive pair
+anc, positive = self.random_double_sampling(patch_emb)
+n_channels = anc.shape[-1]
+# -1：这是一个特殊的值，表示该维度的大小由其他维度和总元素数量决定
+anc = anc.reshape(batch_size, -1, n_channels)
+# 如果anc是一个形状为(m, n)的二维张量，
+# 那么torch.mean(anc, 1, keepdim=True)将返回一个形状为(m, 1)的二维张量，
+# 其中每个元素是原始张量对应行的均值
+anc_compact = torch.mean(anc, 1, keepdim=True)
+anc_compact = self.pro_mlp_character(anc_compact)  # [B, 1, C]
+positive = positive.reshape(batch_size, -1, n_channels)
+positive_compact = torch.mean(positive, 1, keepdim=True)
+positive_compact = self.pro_mlp_character(positive_compact)  # [B, 1, C]
 
-    # QUERY: [char_emb, seq_emb]
-    seq_emb = self.SeqtoEmb(seq).permute(1, 0, 2)
-    T, N, C = seq_emb.shape
+nce_emb_patch = torch.cat((anc_compact, positive_compact), 1)  # [B, 2, C]
+nce_emb_patch = nn.functional.normalize(nce_emb_patch, p=2, dim=2)
 
-    char_emb = self.content_encoder(char_img)  # [4, N, 512]
-    char_emb = torch.mean(char_emb, 0)  # [N, 512]
-    char_emb = repeat(char_emb, 'n c -> t n c', t=1)
-    tgt = torch.cat((char_emb, seq_emb), 0)  # [1+T], put the content token as the first token
-    tgt_mask = generate_square_subsequent_mask(sz=(T + 1)).to(tgt)
-    tgt = self.add_position(tgt)
+# input the writer-wise & character-wise styles into the decoder
+writer_style = memory_fea[:, :batch_size, :]  # [4*N, B, C]
+glyph_style = glyph_memory[:, :batch_size]  # [4, B, N, C]
+glyph_style = rearrange(glyph_style, 't b n c -> (t n) b c')  # [4*N, B, C]
 
-    # [wri_dec_layers, T, B, C]
-    wri_hs = self.wri_decoder(tgt, writer_style, tgt_mask=tgt_mask)
-    # [gly_dec_layers, T, B, C]
-    hs = self.gly_decoder(wri_hs[-1], glyph_style, tgt_mask=tgt_mask)
+# QUERY: [char_emb, seq_emb]
+seq_emb = self.SeqtoEmb(seq).permute(1, 0, 2)
+T, N, C = seq_emb.shape
 
-    # 将矩阵hs的第二和第三维度进行转置
-    h = hs.transpose(1, 2)[-1]  # B T C
-    pred_sequence = self.EmbtoSeq(h)
-    return pred_sequence, nce_emb, nce_emb_patch
+char_emb = self.content_encoder(char_img)  # [4, N, 512]
+char_emb = torch.mean(char_emb, 0)  # [N, 512]
+char_emb = repeat(char_emb, 'n c -> t n c', t=1)
+tgt = torch.cat((char_emb, seq_emb), 0)  # [1+T], put the content token as the first token
+tgt_mask = generate_square_subsequent_mask(sz=(T + 1)).to(tgt)
+tgt = self.add_position(tgt)
+
+# [wri_dec_layers, T, B, C]
+wri_hs = self.wri_decoder(tgt, writer_style, tgt_mask=tgt_mask)
+# [gly_dec_layers, T, B, C]
+hs = self.gly_decoder(wri_hs[-1], glyph_style, tgt_mask=tgt_mask)
+
+# 将矩阵hs的第二和第三维度进行转置
+h = hs.transpose(1, 2)[-1]  # B T C
+pred_sequence = self.EmbtoSeq(h)
+return pred_sequence, nce_emb, nce_emb_patch
 ```
 
 ---
@@ -1474,6 +1476,8 @@ from torchvision.models.resnet import ResNet18_Weights
 from models.model import SeqtoEmb, EmbtoSeq
 from models.transformer import *
 from models.encoder import Content_TR
+
+
 class FontModel(nn.Module):
     def __init__(self,
                  d_model=512,
@@ -1529,10 +1533,12 @@ class FontModel(nn.Module):
         self.EmbtoSeq = EmbtoSeq(input_dim=d_model)
         self.add_position = PositionalEncoding(dim=d_model, dropout=0.1)
         self._reset_parameters()
+
     def _reset_parameters(self):
         for p in self.parameters():
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p)
+
     def forward(self, char_img_gt, std_coors):
         feat = self.feat_encoder(char_img_gt)
         feat = feat.flatten(2).permute(2, 0, 1)
@@ -1543,6 +1549,7 @@ class FontModel(nn.Module):
         character_output = self.pro_mlp_character(glyph_decoded)
         return character_output
 ```
+
 在代码里面 self.feat_encoder已经定义好了,那么在forward里面
 1.feat = self.feat_encoder(char_img_gt),这个char_img_gt格式要求是什么呢?
 
@@ -1552,6 +1559,7 @@ ans:
 2.feat = feat.flatten(2).permute(2, 0, 1)为什么要这么做,之后的shape是什么样子了,且语法不懂
 
 ans:
+
 ```text
 feat.flatten(2) 将 feat 张量从第 2 维度开始展平 即:
 [batch_size, channels, height, width] ==>[batch_size, channels, height * width]
@@ -1581,7 +1589,7 @@ batch_size, num_img, temp, h, w = same_style_img_list.shape
 style_img = same_style_img_list.view(-1, in_planes, h, w)解释一下用法,指出shape变化
 
 ans:
-same_style_img_list.view(-1, in_planes, h, w) 
+same_style_img_list.view(-1, in_planes, h, w)
 将张量重新塑形。-1 表示该维度的大小由其他维度的大小自动推断得出。
 (batch_size, num_img, temp, h, w)==>(batch_size * num_img, temp, h, w)
 ---
@@ -1742,6 +1750,7 @@ class SDT_Generator(nn.Module):
         glyph_memory = rearrange(glyph_memory, 't (b p n) c -> t (p b) n c',
                                  b=batch_size, p=2, n=anchor_num) 
 ```             
+
 1.forward方法里面帮我指出张量的结构变化
 2.glyph_memory = rearrange... 这儿有什么作用?
 
@@ -1750,6 +1759,7 @@ class SDT_Generator(nn.Module):
 锚点数为什么需要呢?有什么作用
 
 ans:
+
 ```text
 锚点数（anchor number）在深度学习和计算机视觉中通常用于目标检测和分割任务。锚点（anchor）是指在图像中预定义的一些框，这些框具有不同的尺寸和长宽比，用于预测可能包含目标的区域。锚点数的作用主要体现在以下几个方面：
 
@@ -1767,6 +1777,7 @@ ans:
 ```
 
 ---
+
 ```
 class SDT_Generator(nn.Module):
 
@@ -1912,6 +1923,7 @@ class SDT_Generator(nn.Module):
 
         feat = self.add_position(feat)
 ```             
+
 ```
 class PositionalEncoding(nn.Module):
     """Sinusoidal positional encoding for non-recurrent neural networks.
@@ -1960,6 +1972,7 @@ class PositionalEncoding(nn.Module):
         emb = self.dropout(emb)
         return emb
 ```
+
 这儿feat = self.add_position(feat),输入的feat是[h*w,B*N,512],
 1.满足输入条件吗?
 2.输出出来是什么形状,怎么判断的?
@@ -1967,7 +1980,7 @@ class PositionalEncoding(nn.Module):
 ---
 
 glyph_memory = rearrange(feat, 't (b p n) c -> t (p b) n c',
-                                 b=batch_size, p=2, n=anchor_num)
+b=batch_size, p=2, n=anchor_num)
 如果feat是[h*w,B*N,512],那么glyph_memory 是什么样子?
 
 ans:
@@ -1976,7 +1989,7 @@ ans:
 [h*w, 2 * batch_size, anchor_num, 512]
 
 ---
- 
+
 char_emb为[h*w,bs,c]
 解释一下
 char_emb = torch.mean(char_emb, 0)  # [N, 512]
@@ -1984,6 +1997,7 @@ char_emb = repeat(char_emb, 'n c -> t n c', t=1)
 分别是什么形状,怎么算的?
 
 ans:
+
 ```text
 char_emb = torch.mean(char_emb, 0)
 这里我们对 char_emb 沿着第一个维度（即 h*w 维度）取平均值。
@@ -2000,11 +2014,11 @@ repeat 函数的参数 'n c -> t n c' 表示将 char_emb 的形状从 [n, c] 扩
 ---
 
 glyph_decoder_layers = TransformerDecoderLayer(
-            d_model, num_head, dim_feedforward, dropout, activation
-        )
+d_model, num_head, dim_feedforward, dropout, activation
+)
 self.glyph_transformer_decoder = TransformerDecoder(
-            glyph_decoder_layers, num_gly_decoder_layers
-        )
+glyph_decoder_layers, num_gly_decoder_layers
+)
 
 class TransformerDecoder(nn.Module):
 
@@ -2095,6 +2109,7 @@ class FontModel(nn.Module):
                 # 这些被去掉的模块通常是 ResNet-18 模型的头部，包括全局平均池化层和全连接层。
                 list(models.resnet18(weights=ResNet18_Weights.IMAGENET1K_V1).children())[1:-2]
         ))
+
     def forward(self, same_style_img_list, std_coors, char_img_gt):
         # [bs, num_img, C, 64, 64] == [B,N,C,H,W]
         batch_size, num_img, temp, h, w = same_style_img_list.shape
@@ -2107,11 +2122,13 @@ class FontModel(nn.Module):
         feat = self.feat_encoder(style_img_list)
         logger.info(f"feat shape after feat_encoder: {feat.shape}")
 ```
+
 style_img_list的shape为[B*N,C,h,w]
 feat = self.feat_encoder(style_img_list)之后
 logger.info(f"feat shape after feat_encoder: {feat.shape}")输出是什么呢?
 
 ans:
+
 ```text
 卷积层：
 输入通道数：1
@@ -2127,6 +2144,7 @@ ResNet-18 的第一个模块是一个步长为2的最大池化层，接着是4�
 输入形状：[B*N, 64, h/2, w/2]
 输出形状：[B*N, 512, h/32, w/32]（因为 ResNet-18 有5个步长为2的层，总共缩小了32倍）
 ```
+
 ![img_2.png](../paper/pics/img_4.png)
 这个公式的原理是基于卷积操作的定义。卷积核在输入特征图上滑动，
 每次滑动一个步长，并在每个位置上进行卷积运算。
@@ -2144,7 +2162,6 @@ hs.transpose(1, 2) 会将 hs 的第1维和第2维进行交换。[1, 4004, 8, 512
 [-1] 取变换后张量的第0维的最后一个元素，得到形状为 [8, 4004, 512] 的张量
 
 ---
- 
 
 ```
 def main(opt):
@@ -2222,7 +2239,9 @@ def main(opt):
     )
     trainer.train()
 ```
+
 我在做字体风格迁移任务 在执行z_train训练的时候输出报错:
+
 ```
 INFO:z_new_start.FontModel:h shape: torch.Size([8, 4004, 512])
 INFO:z_new_start.FontModel:pred_sequence shape: torch.Size([8, 4004, 123])
@@ -2231,6 +2250,7 @@ C:\Users\liuch\.conda\envs\SDTLog1\lib\site-packages\torch\nn\modules\loss.py:53
 ERROR:z_new_start.FontTrainer:Error: The size of tensor a (4004) must match the size of tensor b (200) at non-singleton dimension 2
 train_loader_iter_epoch failed:0
 ```
+
 1.帮我指出什么原因报错的
 2.帮我结合上述想一想,应该怎么改,给出思路
 3.给出关键修改代码
@@ -2238,16 +2258,15 @@ train_loader_iter_epoch failed:0
 ---
 pred_sequence==>[8, 4004, 4]
 pred_sequence = pred_sequence[:, :T, :].view(B, self.train_conf['max_stroke'],
-                                     self.train_conf['max_per_stroke_point'], -1)
+self.train_conf['max_per_stroke_point'], -1)
 解释一下形状变化
-
 
 ans:
 
 pred_sequence[:, :T, :] 选择前 T 个时间步长，形状变为 [batch_size, T, features]。
 
 T 是 max_stroke * max_per_stroke_point，
-我们需要将 pred_sequence 的形状从 [batch_size, T, features] 
+我们需要将 pred_sequence 的形状从 [batch_size, T, features]
 转换为 [batch_size, max_stroke, max_per_stroke_point, features]。
 
 view(B, self.train_conf['max_stroke'], self.train_conf['max_per_stroke_point'], -1)
@@ -2261,6 +2280,7 @@ view 函数用于重新调整张量的形状，使其与目标形状匹配。在
 1.帮我看看有没有需要增减的模块
 2.帮我看看这个forward是否需要修改
 3.给出优化过后的代码
+
 ```python
 import torchvision.models as models
 from torchvision.models.resnet import ResNet18_Weights
@@ -2268,8 +2288,11 @@ from models.transformer import *
 from models.encoder import Content_TR
 from einops import rearrange
 import logging
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
 class FontModel(nn.Module):
     def __init__(self,
                  d_model=512,
@@ -2327,10 +2350,12 @@ class FontModel(nn.Module):
         self.EmbtoSeq = Emb2Seq(input_dim=d_model)
         self.add_position = PositionalEncoding(dim=d_model, dropout=0.1)
         self._init_parameters()
+
     def _init_parameters(self):
         for p in self.parameters():
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p)
+
     def forward(self, same_style_img_list, std_coors, char_img_gt):
         logger.info(
             f"Input shapes: \n"
@@ -2378,6 +2403,7 @@ class FontModel(nn.Module):
                                                      self.train_conf['max_per_stroke_point'], -1)
         logger.info(f"pred_sequence shape after view: {pred_sequence.shape}")
         return pred_sequence
+
     def inference(self, img_list):
         self.eval()
         device = next(self.parameters()).device
@@ -2390,6 +2416,8 @@ class FontModel(nn.Module):
                 pred_sequence = self.forward(img, std_coors, char_img_gt)
                 outputs.append(pred_sequence.cpu().numpy())
         return outputs
+
+
 def generate_square_subsequent_mask(sz: int) -> Tensor:
     mask = (torch.triu(torch.ones(sz, sz)) == 1).transpose(0, 1)
     mask = (
@@ -2399,22 +2427,28 @@ def generate_square_subsequent_mask(sz: int) -> Tensor:
         .masked_fill(mask == 1, float(0.0))
     )
     return mask
+
+
 class Seq2Emb(nn.Module):
     def __init__(self, output_dim, dropout=0.1):
         super().__init__()
         self.fc_1 = nn.Linear(4, 256)
         self.fc_2 = nn.Linear(256, output_dim)
         self.dropout = nn.Dropout(dropout)
+
     def forward(self, seq):
         x = self.dropout(torch.relu(self.fc_1(seq)))
         x = self.fc_2(x)
         return x
+
+
 class Emb2Seq(nn.Module):
     def __init__(self, input_dim, dropout=0.1):
         super().__init__()
         self.fc_1 = nn.Linear(input_dim, 256)
         self.fc_2 = nn.Linear(256, 4)
         self.dropout = nn.Dropout(dropout)
+
     def forward(self, seq):
         x = self.dropout(torch.relu(self.fc_1(seq)))
         x = self.fc_2(x)
@@ -2429,7 +2463,7 @@ class Emb2Seq(nn.Module):
 
 
 ---
- 
+
 ```
 class FontTrainer:
     def __init__(self,
@@ -2551,11 +2585,13 @@ class FontTrainer:
 
 这个FontTrainer有好几个问题,
 1.loss输出有问题
+
 ```
 INFO:z_new_start.FontTrainer:Step 17, Iteration time: 0.7053s, Loss: nan
 INFO:z_new_start.FontTrainer:Validation loss at step 17: nan
 INFO:z_new_start.FontTrainer:Step 17/3720, ETA: 784m 52s, Elapsed time: 216.20s
 ```
+
 2.最好模型保存有问题,每一步都保存模型?很奇怪
 3.tqdm这儿按照epoch也有问题,应该是真正的总步数
 
@@ -2564,6 +2600,7 @@ INFO:z_new_start.FontTrainer:Step 17/3720, ETA: 784m 52s, Elapsed time: 216.20s
 ---
 
 执行报错:
+
 ```
 ERROR:z_new_start.FontTrainer:Loss is NaN at step 0                                               | 0/186 [00:00<?, ?it/s]
 Epoch 1/20:   0%|                                                                                 | 0/186 [00:01<?, ?it/s]
@@ -2585,6 +2622,7 @@ class FontTrainer:
         self.best_loss = float('inf')
         self.scaler = torch.cuda.amp.GradScaler()
         self.accumulation_steps = 32
+
     def train(self):
         num_epochs = self.train_conf['num_epochs']
         max_steps = self.train_conf['MAX_STEPS']
@@ -2619,6 +2657,7 @@ class FontTrainer:
                 return
         logger.info(f"Training finished. Total time: {time.time() - start_time:.2f}s")
         pbar.close()
+
     def _train_iter(self, data, step):
         self.model.train()
         iter_time = time.time()
@@ -2641,6 +2680,7 @@ class FontTrainer:
             self.scaler.update()
         del data, predict, loss
         torch.cuda.empty_cache()
+
     def _valid_iter(self, step):
         self.model.eval()
         total_loss = 0
@@ -2657,6 +2697,7 @@ class FontTrainer:
         avg_loss = total_loss / len(self.valid_loader)
         logger.info(f"Validation loss at step {step}: {avg_loss:.4f}")
         return avg_loss
+
     def _save_checkpoint(self, step):
         if step >= self.train_conf['SNAPSHOT_BEGIN'] and step % self.train_conf['SNAPSHOT_EPOCH'] == 0:
             checkpoint_path = os.path.join(self.data_conf['save_model_dir'], f'checkpoint_step_{step}.pt')
@@ -2673,6 +2714,7 @@ class FontTrainer:
                 [f for f in os.listdir(self.data_conf['save_model_dir']) if f.startswith('checkpoint_step_')])
             for old_checkpoint in checkpoints[:-10]:
                 os.remove(os.path.join(self.data_conf['save_model_dir'], old_checkpoint))
+
     def _save_best_model(self, step, loss):
         best_model_path = os.path.join(self.data_conf['save_model_dir'], 'best_model.pt')
         model_state_dict = self.model.module.state_dict() if isinstance(self.model,
@@ -2684,7 +2726,8 @@ class FontTrainer:
             'loss': loss
         }, best_model_path)
         logger.info(f"Best model saved at step {step} with validation loss {loss:.4f} to {best_model_path}")
-        
+
+
 class FontLoss(nn.Module):
     def __init__(self, coordinate_weight=1.0, stroke_weight=0.5):
         super(FontLoss, self).__init__()
@@ -2713,6 +2756,7 @@ class FontLoss(nn.Module):
 3.不知道为什么predicate全部是nan.帮我找找原因
 4.给出优化的思路和优化过后的关键代码,指出哪些是修改的部分
 模型定义如下:
+
 ```python
 class FontModel(nn.Module):
     def __init__(self,
@@ -2761,12 +2805,14 @@ class FontModel(nn.Module):
         self.add_position = PositionalEncoding(dim=d_model, dropout=0.1)
         self.self_attention = nn.MultiheadAttention(d_model, num_head)
         self._init_parameters()
+
     def _build_feature_encoder(self):
         return nn.Sequential(*(
                 [nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)]
                 +
                 list(models.resnet18(weights=ResNet18_Weights.IMAGENET1K_V1).children())[1:-2]
         ))
+
     def _build_base_encoder(self, d_model, num_head, dim_feedforward, dropout, activation, normalize_before,
                             num_encoder_layers
                             ):
@@ -2774,6 +2820,7 @@ class FontModel(nn.Module):
             d_model, num_head, dim_feedforward, dropout, activation, normalize_before
         )
         return TransformerEncoder(encoder_layer, num_encoder_layers)
+
     def _build_glyph_encoder(self, d_model, num_head, dim_feedforward, dropout, activation, normalize_before,
                              num_glyph_encoder_layers):
         encoder_layer = TransformerEncoderLayer(
@@ -2781,15 +2828,18 @@ class FontModel(nn.Module):
         )
         glyph_norm = nn.LayerNorm(d_model) if normalize_before else None
         return TransformerEncoder(encoder_layer, num_glyph_encoder_layers, glyph_norm)
+
     def _build_glyph_decoder(self, d_model, num_head, dim_feedforward, dropout, activation, num_gly_decoder_layers):
         glyph_decoder_layers = TransformerDecoderLayer(
             d_model, num_head, dim_feedforward, dropout, activation
         )
         return TransformerDecoder(glyph_decoder_layers, num_gly_decoder_layers)
+
     def _init_parameters(self):
         for p in self.parameters():
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p)
+
     def forward(self, same_style_img_list, std_coors, char_img_gt):
         logger.debug(
             f"Input shapes: \n"
@@ -2840,6 +2890,7 @@ class FontModel(nn.Module):
                                                      self.train_conf['max_per_stroke_point'], -1)
         logger.debug(f"pred_sequence shape after view: {pred_sequence.shape}")
         return pred_sequence
+
     @torch.jit.export
     def inference(self, img_list):
         self.eval()
@@ -2854,6 +2905,8 @@ class FontModel(nn.Module):
                 pred_sequence = self.forward(img, std_coors, char_img_gt)
                 outputs.append(pred_sequence.cpu().numpy())
         return outputs
+
+
 def generate_square_subsequent_mask(sz: int) -> Tensor:
     mask = (torch.triu(torch.ones(sz, sz)) == 1).transpose(0, 1)
     mask = (
@@ -2863,22 +2916,28 @@ def generate_square_subsequent_mask(sz: int) -> Tensor:
         .masked_fill(mask == 1, float(0.0))
     )
     return mask
+
+
 class Seq2Emb(nn.Module):
     def __init__(self, output_dim, dropout=0.1):
         super().__init__()
         self.fc_1 = nn.Linear(4, 256)
         self.fc_2 = nn.Linear(256, output_dim)
         self.dropout = nn.Dropout(dropout)
+
     def forward(self, seq):
         x = self.dropout(torch.relu(self.fc_1(seq)))
         x = self.fc_2(x)
         return x
+
+
 class Emb2Seq(nn.Module):
     def __init__(self, input_dim, dropout=0.1):
         super().__init__()
         self.fc_1 = nn.Linear(input_dim, 256)
         self.fc_2 = nn.Linear(256, 4)
         self.dropout = nn.Dropout(dropout)
+
     def forward(self, seq):
         x = self.dropout(torch.relu(self.fc_1(seq)))
         x = self.fc_2(x)
@@ -2886,6 +2945,7 @@ class Emb2Seq(nn.Module):
 ```
 
 ans:
+
 ```text
 forward函数的主要步骤:
 a) 对输入图像进行特征提取
@@ -2914,6 +2974,7 @@ e) 使用glyph_transformer_decoder进行解码
 f) 最后通过EmbtoSeq网络生成预测序列
 这样forward是否可行,帮我标注一下forward的代码哪一块是做什么的
 2.一直报错,怎么解决呀
+
 ```text
 pred_sequence shape after view: torch.Size([8, 20, 200, 4])
 pred_sequence:...[[[..nan..]]]
@@ -2922,120 +2983,121 @@ ERROR:z_new_start.FontTrainer:Error: NaN values in total_loss
 train_loader_iter_epoch failed:0
 ```
 
-
 ---
 
 怎么知道什么时候需要把形状调成另外一个样子,有什么诀窍吗?
+
 ```python
     def forward(self, same_style_img_list, std_coors, char_img_gt):
-        check_tensor(same_style_img_list, "same_style_img_list")
-        check_tensor(std_coors, "std_coors")
-        check_tensor(char_img_gt, "char_img_gt")
-        logger.info(
-            f"Input shapes: \n"
-            f"same_style_img_list={same_style_img_list.shape}\n"
-            f"std_coors={std_coors.shape}\n"
-            f"char_img_gt={char_img_gt.shape}"
-        )
-        # [bs, num_img, C, 64, 64] == [B,N,C,H,W]
-        batch_size, num_img, temp, h, w = same_style_img_list.shape
-        # [B,N,C,H,W]==>[B*N,C,h,w]
-        style_img_list = same_style_img_list.view(-1, temp, h, w)
-        logger.info(f"style_img_list shape: {style_img_list.shape}")
+    check_tensor(same_style_img_list, "same_style_img_list")
+    check_tensor(std_coors, "std_coors")
+    check_tensor(char_img_gt, "char_img_gt")
+    logger.info(
+        f"Input shapes: \n"
+        f"same_style_img_list={same_style_img_list.shape}\n"
+        f"std_coors={std_coors.shape}\n"
+        f"char_img_gt={char_img_gt.shape}"
+    )
+    # [bs, num_img, C, 64, 64] == [B,N,C,H,W]
+    batch_size, num_img, temp, h, w = same_style_img_list.shape
+    # [B,N,C,H,W]==>[B*N,C,h,w]
+    style_img_list = same_style_img_list.view(-1, temp, h, w)
+    logger.info(f"style_img_list shape: {style_img_list.shape}")
 
-        # [a] 编码风格图像特征
-        # [B*N,C,h,w]==>[B*N, 64, h/2, w/2]==> [B*N, 512, h/32, w/32]
-        feat = self.feat_encoder(style_img_list)
-        check_tensor(feat, "feat after feat_encoder")
-        logger.info(f"feat shape after feat_encoder: {feat.shape}")
+    # [a] 编码风格图像特征
+    # [B*N,C,h,w]==>[B*N, 64, h/2, w/2]==> [B*N, 512, h/32, w/32]
+    feat = self.feat_encoder(style_img_list)
+    check_tensor(feat, "feat after feat_encoder")
+    logger.info(f"feat shape after feat_encoder: {feat.shape}")
 
-        # [B*N, 512, h/32, w/32]==>[B*N, 512, h/32 * w/32] ==> [h/32*w/32,B*N,512] = [4, 16, 512]
-        feat = feat.view(batch_size * num_img, 512, -1).permute(2, 0, 1)
-        logger.info(f"feat shape after view and permute: {feat.shape}")
-        feat = self.add_position(feat)
+    # [B*N, 512, h/32, w/32]==>[B*N, 512, h/32 * w/32] ==> [h/32*w/32,B*N,512] = [4, 16, 512]
+    feat = feat.view(batch_size * num_img, 512, -1).permute(2, 0, 1)
+    logger.info(f"feat shape after view and permute: {feat.shape}")
+    feat = self.add_position(feat)
 
-        feat = self.base_encoder(feat)
-        glyph_feat = self.glyph_encoder(feat)
-        font_feat = self.font_encoder(feat)
-        check_tensor(feat, "feat after base_encoder")
-        check_tensor(glyph_feat, "glyph_feat after glyph_encoder")
-        check_tensor(font_feat, "font_feat after font_encoder")
+    feat = self.base_encoder(feat)
+    glyph_feat = self.glyph_encoder(feat)
+    font_feat = self.font_encoder(feat)
+    check_tensor(feat, "feat after base_encoder")
+    check_tensor(glyph_feat, "glyph_feat after glyph_encoder")
+    check_tensor(font_feat, "font_feat after font_encoder")
 
-        # 重新排列特征以分离风格和内容
-        # [h/32*w/32,B*N,512] ==> [h/32*w/32,2*B,N/2,512]
-        glyph_memory = rearrange(glyph_feat, 't (b p n) c -> t (p b) n c',
-                                 b=batch_size, p=2, n=num_img // 2)
-        font_memory = rearrange(font_feat, 't (b p n) c -> t (p b) n c',
-                                b=batch_size, p=2, n=num_img // 2)
-        logger.info(f"glyph_memory shape: {glyph_memory.shape}")
-        logger.info(f"font_memory shape: {font_memory.shape}")
+    # 重新排列特征以分离风格和内容
+    # [h/32*w/32,B*N,512] ==> [h/32*w/32,2*B,N/2,512]
+    glyph_memory = rearrange(glyph_feat, 't (b p n) c -> t (p b) n c',
+                             b=batch_size, p=2, n=num_img // 2)
+    font_memory = rearrange(font_feat, 't (b p n) c -> t (p b) n c',
+                            b=batch_size, p=2, n=num_img // 2)
+    logger.info(f"glyph_memory shape: {glyph_memory.shape}")
+    logger.info(f"font_memory shape: {font_memory.shape}")
 
-        font_memory_feat = rearrange(font_memory, 't b n c ->(t n) b c')
+    font_memory_feat = rearrange(font_memory, 't b n c ->(t n) b c')
 
-        # [h/32*w/32,2*B,N/2,512] ==> [h/32*w/32,B,N/2,512]
-        glyph_style = glyph_memory[:, :batch_size]
-        logger.debug(f"glyph_style shape: {glyph_style.shape}")
+    # [h/32*w/32,2*B,N/2,512] ==> [h/32*w/32,B,N/2,512]
+    glyph_style = glyph_memory[:, :batch_size]
+    logger.debug(f"glyph_style shape: {glyph_style.shape}")
 
-        # [c] Self-attention on glyph style
-        font_style = font_memory_feat[:, :batch_size, :]  # [4*N, B, C]
-        glyph_style = glyph_memory[:, :batch_size]  # [4, B, N, C]
-        glyph_style = rearrange(glyph_style, 't b n c -> (t n) b c')  # [4*N, B, C]
+    # [c] Self-attention on glyph style
+    font_style = font_memory_feat[:, :batch_size, :]  # [4*N, B, C]
+    glyph_style = glyph_memory[:, :batch_size]  # [4, B, N, C]
+    glyph_style = rearrange(glyph_style, 't b n c -> (t n) b c')  # [4*N, B, C]
 
-        # [d] Encoding standard coordinates and character embeddings
-        # 处理标准坐标
-        # [8, 20, 200, 4]=[B,20,200,4] ==> [B,4000,4]
-        # std_coors = rearrange(std_coors, 'b t n c -> b (t n) c')
-        # logger.debug(f"std_coors shape after rearrange: {std_coors.shape}")
-        # [B,4000,4]==>[B,4000,512]==>[4000,B,512]
-        seq_emb = self.SeqtoEmb(std_coors).permute(1, 0, 2)
-        T, N, C = seq_emb.shape
-        logger.debug(f"seq_emb shape: {seq_emb.shape}")
-        check_tensor(seq_emb, "seq_emb after SeqtoEmb")
+    # [d] Encoding standard coordinates and character embeddings
+    # 处理标准坐标
+    # [8, 20, 200, 4]=[B,20,200,4] ==> [B,4000,4]
+    # std_coors = rearrange(std_coors, 'b t n c -> b (t n) c')
+    # logger.debug(f"std_coors shape after rearrange: {std_coors.shape}")
+    # [B,4000,4]==>[B,4000,512]==>[4000,B,512]
+    seq_emb = self.SeqtoEmb(std_coors).permute(1, 0, 2)
+    T, N, C = seq_emb.shape
+    logger.debug(f"seq_emb shape: {seq_emb.shape}")
+    check_tensor(seq_emb, "seq_emb after SeqtoEmb")
 
-        # 提取目标字符图像的内容特征
-        # [bs, 1, 64, 64] = [B,C,H,W]==> [B,512,H/32,W/32]==>rearrange(x,'n c h w -> (h w) n c')=[4, B, 512]
-        char_emb = self.content_encoder(char_img_gt)
-        logger.debug(f"char_emb shape: {char_emb.shape}")
-        check_tensor(char_emb, "char_emb after content_encoder")
-        char_emb = torch.mean(char_emb, 0)
-        char_emb = repeat(char_emb, 'n c -> t n c', t=1)
-        # 准备解码器输入
-        # [4000,B,512] + [4, B, 512] = [4004, B, 512]
-        tgt = torch.cat((char_emb, seq_emb), 0)
-        logger.debug(f"tgt shape: {tgt.shape}")
-        tgt_mask = generate_square_subsequent_mask(T + 1).to(tgt.device)
-        tgt = self.add_position(tgt)
-        logger.debug(f"tgt shape after add_position: {tgt.shape}")
-        check_tensor(tgt, "tgt after add_position")
-        check_tensor(glyph_style, "glyph_style before glyph_transformer_decoder")
-        # check_tensor(tgt_mask, "tgt_mask")
+    # 提取目标字符图像的内容特征
+    # [bs, 1, 64, 64] = [B,C,H,W]==> [B,512,H/32,W/32]==>rearrange(x,'n c h w -> (h w) n c')=[4, B, 512]
+    char_emb = self.content_encoder(char_img_gt)
+    logger.debug(f"char_emb shape: {char_emb.shape}")
+    check_tensor(char_emb, "char_emb after content_encoder")
+    char_emb = torch.mean(char_emb, 0)
+    char_emb = repeat(char_emb, 'n c -> t n c', t=1)
+    # 准备解码器输入
+    # [4000,B,512] + [4, B, 512] = [4004, B, 512]
+    tgt = torch.cat((char_emb, seq_emb), 0)
+    logger.debug(f"tgt shape: {tgt.shape}")
+    tgt_mask = generate_square_subsequent_mask(T + 1).to(tgt.device)
+    tgt = self.add_position(tgt)
+    logger.debug(f"tgt shape after add_position: {tgt.shape}")
+    check_tensor(tgt, "tgt after add_position")
+    check_tensor(glyph_style, "glyph_style before glyph_transformer_decoder")
+    # check_tensor(tgt_mask, "tgt_mask")
 
-        # [e] Decoding using glyph_transformer_decoder
-        # 使用解码器生成预测序列
-        # [1, 4004, 8, 512]
-        font_hs = self.font_transformer_decoder(tgt, font_style, tgt_mask=tgt_mask)
-        hs = self.glyph_transformer_decoder(font_hs[-1], glyph_style, tgt_mask)
-        logger.debug(f"hs shape: {hs.shape}")
-        check_tensor(hs, "hs after glyph_transformer_decoder")
-        # [4004, 8, 512]
-        h = hs.transpose(1, 2)[-1]
-        logger.debug(f"h shape: {h.shape}")
-        check_tensor(h, "h after transpose")
+    # [e] Decoding using glyph_transformer_decoder
+    # 使用解码器生成预测序列
+    # [1, 4004, 8, 512]
+    font_hs = self.font_transformer_decoder(tgt, font_style, tgt_mask=tgt_mask)
+    hs = self.glyph_transformer_decoder(font_hs[-1], glyph_style, tgt_mask)
+    logger.debug(f"hs shape: {hs.shape}")
+    check_tensor(hs, "hs after glyph_transformer_decoder")
+    # [4004, 8, 512]
+    h = hs.transpose(1, 2)[-1]
+    logger.debug(f"h shape: {h.shape}")
+    check_tensor(h, "h after transpose")
 
-        # [f] Generating prediction sequence using EmbtoSeq network
-        pred_sequence = self.EmbtoSeq(h)
-        logger.debug(f"pred_sequence shape: {pred_sequence.shape}")
-        check_tensor(pred_sequence, "pred_sequence after EmbtoSeq")
+    # [f] Generating prediction sequence using EmbtoSeq network
+    pred_sequence = self.EmbtoSeq(h)
+    logger.debug(f"pred_sequence shape: {pred_sequence.shape}")
+    check_tensor(pred_sequence, "pred_sequence after EmbtoSeq")
 
-        B, T, _ = std_coors.shape  # [B,4000,4]
-        pred_sequence = pred_sequence[:, :T, :].view(B, self.train_conf['max_stroke'],
-                                                     self.train_conf['max_per_stroke_point'], -1)
-        logger.debug(f"pred_sequence shape after view: {pred_sequence.shape}")
-        check_tensor(pred_sequence, "pred_sequence after view")
-        return pred_sequence
+    B, T, _ = std_coors.shape  # [B,4000,4]
+    pred_sequence = pred_sequence[:, :T, :].view(B, self.train_conf['max_stroke'],
+                                                 self.train_conf['max_per_stroke_point'], -1)
+    logger.debug(f"pred_sequence shape after view: {pred_sequence.shape}")
+    check_tensor(pred_sequence, "pred_sequence after view")
+    return pred_sequence
 ```
 
 ans:
+
 ```text
 常见的诀窍,何时需要调整张量的形状：
 适应模型输入要求：
@@ -3062,84 +3124,85 @@ squeeze(): 用于移除大小为1的维度。
 
 ```python
     def forward(self, style_imgs, seq, char_img):
-        # style_imgs 是风格图片的输入，seq 是序列输入，char_img 是字符图片输入。
-        # 风格图片的批次大小、图片数量、通道数、高度和宽度。
-        batch_size, num_imgs, in_planes, h, w = style_imgs.shape
+    # style_imgs 是风格图片的输入，seq 是序列输入，char_img 是字符图片输入。
+    # 风格图片的批次大小、图片数量、通道数、高度和宽度。
+    batch_size, num_imgs, in_planes, h, w = style_imgs.shape
 
-        style_imgs = style_imgs.view(-1, in_planes, h, w)  # [B*2N, C:1, H, W]
-        style_embe = self.Feat_Encoder(style_imgs)  # [B*2N, C:512, 2, 2]
+    style_imgs = style_imgs.view(-1, in_planes, h, w)  # [B*2N, C:1, H, W]
+    style_embe = self.Feat_Encoder(style_imgs)  # [B*2N, C:512, 2, 2]
 
-        anchor_num = num_imgs // 2
-        # [4, B*2N, C:512] permute,改变张量的维度顺序
-        style_embe = style_embe.view(batch_size * num_imgs, 512, -1).permute(2, 0, 1)
-        FEAT_ST_ENC = self.add_position(style_embe)
+    anchor_num = num_imgs // 2
+    # [4, B*2N, C:512] permute,改变张量的维度顺序
+    style_embe = style_embe.view(batch_size * num_imgs, 512, -1).permute(2, 0, 1)
+    FEAT_ST_ENC = self.add_position(style_embe)
 
-        memory = self.base_encoder(FEAT_ST_ENC)  # [4, B*2N, C]
-        writer_memory = self.writer_head(memory)
-        glyph_memory = self.glyph_head(memory)
+    memory = self.base_encoder(FEAT_ST_ENC)  # [4, B*2N, C]
+    writer_memory = self.writer_head(memory)
+    glyph_memory = self.glyph_head(memory)
 
-        writer_memory = rearrange(writer_memory, 't (b p n) c -> t (p b) n c',
-                                  b=batch_size, p=2, n=anchor_num)  # [4, 2*B, N, C]
-        glyph_memory = rearrange(glyph_memory, 't (b p n) c -> t (p b) n c',
-                                 b=batch_size, p=2, n=anchor_num)  # [4, 2*B, N, C]
+    writer_memory = rearrange(writer_memory, 't (b p n) c -> t (p b) n c',
+                              b=batch_size, p=2, n=anchor_num)  # [4, 2*B, N, C]
+    glyph_memory = rearrange(glyph_memory, 't (b p n) c -> t (p b) n c',
+                             b=batch_size, p=2, n=anchor_num)  # [4, 2*B, N, C]
 
-        # writer-nce
-        memory_fea = rearrange(writer_memory, 't b n c ->(t n) b c')  # [4*N, 2*B, C]
-        # 计算memory_fea张量在第0个维度上的平均值
-        compact_fea = torch.mean(memory_fea, 0)  # [2*B, C]
-        # compact_fea:[2*B, C:512] ->  nce_emb: [B, 2, C:128]
-        pro_emb = self.pro_mlp_writer(compact_fea)
-        query_emb = pro_emb[:batch_size, :]
-        pos_emb = pro_emb[batch_size:, :]
-        # 将两个嵌入向量（query_emb和pos_emb）沿着第二个维度（索引为1）堆叠起来，形成一个新的张量
-        nce_emb = torch.stack((query_emb, pos_emb), 1)  # [B, 2, C]
-        nce_emb = nn.functional.normalize(nce_emb, p=2, dim=2)
+    # writer-nce
+    memory_fea = rearrange(writer_memory, 't b n c ->(t n) b c')  # [4*N, 2*B, C]
+    # 计算memory_fea张量在第0个维度上的平均值
+    compact_fea = torch.mean(memory_fea, 0)  # [2*B, C]
+    # compact_fea:[2*B, C:512] ->  nce_emb: [B, 2, C:128]
+    pro_emb = self.pro_mlp_writer(compact_fea)
+    query_emb = pro_emb[:batch_size, :]
+    pos_emb = pro_emb[batch_size:, :]
+    # 将两个嵌入向量（query_emb和pos_emb）沿着第二个维度（索引为1）堆叠起来，形成一个新的张量
+    nce_emb = torch.stack((query_emb, pos_emb), 1)  # [B, 2, C]
+    nce_emb = nn.functional.normalize(nce_emb, p=2, dim=2)
 
-        # glyph-nce
-        patch_emb = glyph_memory[:, :batch_size]  # [4, B, N, C]
-        # sample the positive pair
-        anc, positive = self.random_double_sampling(patch_emb)
-        n_channels = anc.shape[-1]
-        # -1：这是一个特殊的值，表示该维度的大小由其他维度和总元素数量决定
-        anc = anc.reshape(batch_size, -1, n_channels)
-        # 如果anc是一个形状为(m, n)的二维张量，
-        # 那么torch.mean(anc, 1, keepdim=True)将返回一个形状为(m, 1)的二维张量，
-        # 其中每个元素是原始张量对应行的均值
-        anc_compact = torch.mean(anc, 1, keepdim=True)
-        anc_compact = self.pro_mlp_character(anc_compact)  # [B, 1, C]
-        positive = positive.reshape(batch_size, -1, n_channels)
-        positive_compact = torch.mean(positive, 1, keepdim=True)
-        positive_compact = self.pro_mlp_character(positive_compact)  # [B, 1, C]
+    # glyph-nce
+    patch_emb = glyph_memory[:, :batch_size]  # [4, B, N, C]
+    # sample the positive pair
+    anc, positive = self.random_double_sampling(patch_emb)
+    n_channels = anc.shape[-1]
+    # -1：这是一个特殊的值，表示该维度的大小由其他维度和总元素数量决定
+    anc = anc.reshape(batch_size, -1, n_channels)
+    # 如果anc是一个形状为(m, n)的二维张量，
+    # 那么torch.mean(anc, 1, keepdim=True)将返回一个形状为(m, 1)的二维张量，
+    # 其中每个元素是原始张量对应行的均值
+    anc_compact = torch.mean(anc, 1, keepdim=True)
+    anc_compact = self.pro_mlp_character(anc_compact)  # [B, 1, C]
+    positive = positive.reshape(batch_size, -1, n_channels)
+    positive_compact = torch.mean(positive, 1, keepdim=True)
+    positive_compact = self.pro_mlp_character(positive_compact)  # [B, 1, C]
 
-        nce_emb_patch = torch.cat((anc_compact, positive_compact), 1)  # [B, 2, C]
-        nce_emb_patch = nn.functional.normalize(nce_emb_patch, p=2, dim=2)
+    nce_emb_patch = torch.cat((anc_compact, positive_compact), 1)  # [B, 2, C]
+    nce_emb_patch = nn.functional.normalize(nce_emb_patch, p=2, dim=2)
 
-        # input the writer-wise & character-wise styles into the decoder
-        writer_style = memory_fea[:, :batch_size, :]  # [4*N, B, C]
-        glyph_style = glyph_memory[:, :batch_size]  # [4, B, N, C]
-        glyph_style = rearrange(glyph_style, 't b n c -> (t n) b c')  # [4*N, B, C]
+    # input the writer-wise & character-wise styles into the decoder
+    writer_style = memory_fea[:, :batch_size, :]  # [4*N, B, C]
+    glyph_style = glyph_memory[:, :batch_size]  # [4, B, N, C]
+    glyph_style = rearrange(glyph_style, 't b n c -> (t n) b c')  # [4*N, B, C]
 
-        # QUERY: [char_emb, seq_emb]
-        seq_emb = self.SeqtoEmb(seq).permute(1, 0, 2)
-        T, N, C = seq_emb.shape
+    # QUERY: [char_emb, seq_emb]
+    seq_emb = self.SeqtoEmb(seq).permute(1, 0, 2)
+    T, N, C = seq_emb.shape
 
-        char_emb = self.content_encoder(char_img)  # [4, N, 512]
-        char_emb = torch.mean(char_emb, 0)  # [N, 512]
-        char_emb = repeat(char_emb, 'n c -> t n c', t=1)
-        tgt = torch.cat((char_emb, seq_emb), 0)  # [1+T], put the content token as the first token
-        tgt_mask = generate_square_subsequent_mask(sz=(T + 1)).to(tgt)
-        tgt = self.add_position(tgt)
+    char_emb = self.content_encoder(char_img)  # [4, N, 512]
+    char_emb = torch.mean(char_emb, 0)  # [N, 512]
+    char_emb = repeat(char_emb, 'n c -> t n c', t=1)
+    tgt = torch.cat((char_emb, seq_emb), 0)  # [1+T], put the content token as the first token
+    tgt_mask = generate_square_subsequent_mask(sz=(T + 1)).to(tgt)
+    tgt = self.add_position(tgt)
 
-        # [wri_dec_layers, T, B, C]
-        wri_hs = self.wri_decoder(tgt, writer_style, tgt_mask=tgt_mask)
-        # [gly_dec_layers, T, B, C]
-        hs = self.gly_decoder(wri_hs[-1], glyph_style, tgt_mask=tgt_mask)
+    # [wri_dec_layers, T, B, C]
+    wri_hs = self.wri_decoder(tgt, writer_style, tgt_mask=tgt_mask)
+    # [gly_dec_layers, T, B, C]
+    hs = self.gly_decoder(wri_hs[-1], glyph_style, tgt_mask=tgt_mask)
 
-        # 将矩阵hs的第二和第三维度进行转置
-        h = hs.transpose(1, 2)[-1]  # B T C
-        pred_sequence = self.EmbtoSeq(h)
-        return pred_sequence, nce_emb, nce_emb_patch
+    # 将矩阵hs的第二和第三维度进行转置
+    h = hs.transpose(1, 2)[-1]  # B T C
+    pred_sequence = self.EmbtoSeq(h)
+    return pred_sequence, nce_emb, nce_emb_patch
 ```
+
 为什么需要做这个操作呢?
 rearrange(glyph_feat, 't (b p n) c -> t (p b) n c',b=batch_size, p=2, n=num_img // 2)
 
@@ -3148,6 +3211,7 @@ rearrange(glyph_feat, 't (b p n) c -> t (p b) n c',b=batch_size, p=2, n=num_img 
 正样本和负样本,什么意思?
 
 ans:
+
 ```text
 正样本（Positive Samples）：
 这些是与目标或锚点样本相似或相关的样本。
@@ -3165,13 +3229,14 @@ ans:
 ```
 
 ---
- 
+
 为什么Glyph-NCE 特征计算和Writer-NCE 特征计算差别这么大?
 
 ---
 
 std_coors.shape==>[4000,B,4]
 seq_emb = self.SeqtoEmb(std_coors)的形状是怎么变化的
+
 ```
 class Seq2Emb(nn.Module):
 
@@ -3188,7 +3253,7 @@ class Seq2Emb(nn.Module):
 ```
 
 ---
- 
+
 char_emb.shape==>[4, B, 512]
 char_emb = torch.mean(char_emb, 0)
 char_emb = repeat(char_emb, 'n c -> t n c', t=1)
@@ -3197,17 +3262,19 @@ char_emb的形状是怎么变化的?
 
 ---
 
-
 ```python
 self.font_transformer_decoder = self._build_font_decoder(
     d_model, num_head, dim_feedforward, dropout, activation, num_gly_decoder_layers
 )
+
+
 def _build_font_decoder(self, d_model, num_head, dim_feedforward, dropout, activation, num_gly_decoder_layers):
     font_decoder_layers = TransformerDecoderLayer(
         d_model, num_head, dim_feedforward, dropout, activation
     )
     return TransformerDecoder(font_decoder_layers, num_gly_decoder_layers)
 ```
+
 ```python
 class TransformerDecoder(nn.Module):
     def __init__(self,
@@ -3252,6 +3319,7 @@ class TransformerDecoder(nn.Module):
             return torch.stack(intermediate)
 
         return output.unsqueeze(0)
+
 
 class TransformerDecoderLayer(nn.Module):
 
@@ -3299,6 +3367,7 @@ class TransformerDecoderLayer(nn.Module):
             logger.debug("NaN values found in TransformerDecoderLayer output")
             logger.debug(f"Layer output stats - min: {out.min()}, max: {out.max()}, mean: {out.mean()}")
         return out
+
     def forward_post(self, tgt, memory,
                      tgt_mask: Optional[Tensor] = None,
                      memory_mask: Optional[Tensor] = None,
@@ -3335,10 +3404,12 @@ class TransformerDecoderLayer(nn.Module):
         tgt = self.norm3(tgt)
         return tgt
 
+
 def _get_clone(module, N):
     return nn.ModuleList([copy.deepcopy(module) for i in range(N)])
 
 ```
+
 font_hs = self.font_transformer_decoder(tgt, font_style, tgt_mask=tgt_mask)
 tgt:torch.Size([4001, 4, 512])
 font_style:torch.Size([24, 4, 512])
@@ -3357,14 +3428,15 @@ tgt2 = self.self_attn(q, k, value=tgt, attn_mask=tgt_mask,
 if torch.isnan(tgt2).any():
     logger.debug("NaN in tgt2 after self_attn")
 ```
+
 print(q.shape,k.shape,tgt.shape,tgt_mask.shape)
 输出:
 torch.Size([4001, 4, 512]) torch.Size([4001, 4, 512]) torch.Size([4001, 4, 512]) torch.Size([4001, 4001])
 NaN in tgt2 after self_attn
 其中tgt_mask类似:
 [[0, inf, inf...],
-    [0, 0, inf...],
-    [0, 0, 0]...]....
+[0, 0, inf...],
+[0, 0, 0]...]....
 怎么回事呢?
 
 ---
@@ -3503,20 +3575,21 @@ class FontModel(nn.Module):
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p)
 ```
+
 使用公共的
 self.encoder_layer = TransformerEncoderLayer(
-            d_model, num_head, dim_feedforward, dropout, activation, normalize_before
-        )
+d_model, num_head, dim_feedforward, dropout, activation, normalize_before
+)
 self.decoder_layer = TransformerDecoderLayer(
-            d_model, num_head, dim_feedforward, dropout, activation
-        )
+d_model, num_head, dim_feedforward, dropout, activation
+)
 会减少参数量,或者减少计算吗?
 
 ans:
 虽然重用这些层定义看起来会减少代码量，但它不会减少模型的参数量或计算量
 
 ---
- 
+
 font_hs shape: torch.Size([2, 4001, 4, 512])
 font_hs[-1]是什么意思?
 
@@ -3528,13 +3601,15 @@ font_hs[-1] 将返回一个形状为 [4001, 4, 512] 的张量
 ---
 
 执行
+
 ```python
-print(q.shape,k.shape,tgt.shape,tgt_mask.shape)
+print(q.shape, k.shape, tgt.shape, tgt_mask.shape)
 tgt2 = self.self_attn(q, k, value=tgt, attn_mask=tgt_mask,
                       key_padding_mask=tgt_key_padding_mask)[0]
 if torch.isnan(tgt2).any():
     logger.info(f"NaN in tgt2 after self_attn,shape:{tgt2.shape}")
 ```
+
 报错:
 torch.Size([4001, 1, 512]) torch.Size([4001, 1, 512]) torch.Size([4001, 1, 512]) torch.Size([4001, 4001])
 INFO:z_new_start.FontTransformer:NaN in tgt2 after self_attn,shape:torch.Size([4001, 1, 512])
@@ -3553,7 +3628,7 @@ attn_mask 或 key_padding_mask 问题：attn_mask 或 key_padding_mask 可能包
 导致注意力机制中的计算出现问题。确保这些 mask 值是正确的。
 
 ---
- 
+
 ```python
 model = FontModel(
     d_model=train_conf['d_model'],
@@ -3577,6 +3652,7 @@ else:
     logger.info("Using CPU")
 model.to(device)
 ```
+
 这个似乎是平均分在多个gpu上面训练,假设我有4个gpu,每个32G,训练的时候GPU-MEM大概2000MiB,但是第一个gpu卡有其他服务在执行,有没有办法不平均分配呢
 
 ---
@@ -3591,10 +3667,12 @@ if (step + 1) % self.accumulation_steps == 0:
     self.scaler.update()
     self.optimizer.zero_grad()
 ```
+
 ```python
 self.model.zero_grad()
 loss.backward()
 ```
+
 哪个是对的,一个先lossback,一个先zero_grad
 
 ans:
@@ -3607,138 +3685,422 @@ ans:
 
 ---
 
+```
+    model = FontModel(
+        d_model=train_conf['d_model'],
+        num_head=train_conf['num_head'],
+        num_encoder_layers=train_conf['num_encoder_layers'],
+        num_glyph_encoder_layers=train_conf['num_glyph_encoder_layers'],
+        num_gly_decoder_layers=train_conf['num_gly_decoder_layers'],
+        dim_feedforward=train_conf['dim_feedforward'],
+        dropout=train_conf['dropout'],
+        activation="relu",
+        normalize_before=True,
+        return_intermediate_dec=True,
+        train_conf=train_conf,
+    )
+    if torch.cuda.device_count() > 1:
+        logger.info(f"Using {torch.cuda.device_count()} GPUs")
+        model = torch.nn.DataParallel(model)
+    elif torch.cuda.is_available():
+        logger.info("Using single GPU")
+    else:
+        logger.info("Using CPU")
+    model.to(device)
+    if len(opt.pretrained_model) > 0:
+        state_dict = torch.load(opt.pretrained_model)
+        if isinstance(model, torch.nn.DataParallel):
+            model.module.load_state_dict(state_dict)
+        else:
+            model.load_state_dict(state_dict)
+        logger.info('loaded pretrained model from {}'.format(opt.pretrained_model))
+    model.eval()
+```
+
+我在准备加载模型开始推理,下面2个在上述代码位置对吗?
+model.to(device)
+model.eval()
+
+---
+
+```python
+    def train(self):
+    num_epochs = self.train_conf['num_epochs']
+    max_steps = self.train_conf['MAX_STEPS']
+    start_time = time.time()
+    step = 0
+
+    total_steps = num_epochs * len(self.train_loader) if num_epochs * len(
+        self.train_loader) <= max_steps else max_steps
+    pbar = tqdm(total=total_steps, desc="Training Progress")
+    logger.info(f"Start training epochs: {int(total_steps / len(self.train_loader))}")
+
+    for epoch in range(num_epochs):
+        train_loader_iter = iter(self.train_loader)
+        try:
+            while True:
+                if max_steps and step >= max_steps:
+                    logger.info(
+                        f"Reached max steps: {max_steps}. Stopping training. The epoch:{epoch}. Total time: {time.time() - start_time:.2f}s")
+                    return
+                data = next(train_loader_iter)
+                self._train_iter(data, step)
+                if step % self.accumulation_steps == 0:
+                    self._save_checkpoint(step)
+                    val_loss = self._valid_iter(step)
+                    if val_loss < self.best_loss:
+                        self.best_loss = val_loss
+                        self._save_best_model(step, val_loss)
+                step += 1
+                pbar.update(1)
+                torch.cuda.empty_cache()
+        except StopIteration:
+            pass
+        except Exception as e:
+            pbar.close()
+            logger.error(f"Error: {e}\ntrain_loader_iter_epoch failed:{epoch}")
+            return
+    logger.info(f"Training finished. Total time: {time.time() - start_time:.2f}s")
+    pbar.close()
+
+
+def _train_iter(self, data, step):
+    self.model.train()
+    # 仅在需要时将数据放入 GPU
+    char_img_gt = data['char_img'].to(self.device, non_blocking=True)
+    coordinates_gt = data['coordinates'].to(self.device, non_blocking=True)
+    std_coors = data['std_coors'].to(self.device, non_blocking=True)
+    same_style_img_list = data['same_style_img_list'].to(self.device, non_blocking=True)
+
+    assert not torch.isnan(char_img_gt).any(), "NaN values in char_img_gt"
+    assert not torch.isnan(coordinates_gt).any(), "NaN values in coordinates_gt"
+    assert not torch.isnan(std_coors).any(), "NaN values in std_coors"
+    assert not torch.isnan(same_style_img_list).any(), "NaN values in same_style_img_list"
+
+    # PyTorch 提供的自动混合精度训练
+    with torch.cuda.amp.autocast():
+        # torch.Size([bs, num, c, 64, 64])
+        # torch.Size([bs, 20, 200, 4])
+        # torch.Size([bs, c, 64, 64])
+        predict = self.model(same_style_img_list, std_coors, char_img_gt)
+        assert predict.shape == coordinates_gt.shape, f"Shape mismatch: predict {predict.shape}, coordinates_gt {coordinates_gt.shape}"
+        loss = self.criterion(predict, coordinates_gt)
+        if torch.isnan(loss):
+            logger.error(f"Loss is NaN at step {step}")
+            raise ValueError("Loss is NaN")
+        loss = loss / self.accumulation_steps
+
+    logger.info(f"Step {step}, Loss: {loss.item() / 50}")
+    self.scaler.scale(loss).backward()
+    # 增加梯度累加
+    if step % self.accumulation_steps == 0:
+        self.scaler.unscale_(self.optimizer)
+        torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)  # 梯度裁剪
+        self.scaler.step(self.optimizer)
+        self.scaler.update()
+        self.optimizer.zero_grad()
+
+    del data, predict, loss
+    torch.cuda.empty_cache()
+```
+
+这儿删除del data, predict, loss是否有问题?
+我删除了loss,会不会没法累计梯度了?
+
+---
+
+```python
+    model = FontModel(
+    d_model=train_conf['d_model'],
+    num_head=train_conf['num_head'],
+    num_encoder_layers=train_conf['num_encoder_layers'],
+    num_glyph_encoder_layers=train_conf['num_glyph_encoder_layers'],
+    num_gly_decoder_layers=train_conf['num_gly_decoder_layers'],
+    dim_feedforward=train_conf['dim_feedforward'],
+    dropout=train_conf['dropout'],
+    activation="relu",
+    normalize_before=True,
+    return_intermediate_dec=True,
+    train_conf=train_conf,
+)
+if torch.cuda.device_count() > 1:
+    logger.info(f"Using {torch.cuda.device_count()} GPUs")
+    model = torch.nn.DataParallel(model)
+elif torch.cuda.is_available():
+    logger.info("Using single GPU")
+else:
+    logger.info("Using CPU")
+model.to(device)
+if len(opt.pretrained_model) > 0:
+    state_dict = torch.load(opt.pretrained_model)
+    # Adjust state_dict keys if necessary
+    if isinstance(model, torch.nn.DataParallel):
+        new_state_dict = OrderedDict()
+        for k, v in state_dict.items():
+            name = 'module.' + k if not k.startswith('module.') else k  # add 'module.' prefix if not present
+            new_state_dict[name] = v
+        model.load_state_dict(new_state_dict)
+    else:
+        new_state_dict = OrderedDict()
+        for k, v in state_dict.items():
+            name = k[7:] if k.startswith('module.') else k  # remove 'module.' prefix if present
+            new_state_dict[name] = v
+        model.load_state_dict(new_state_dict)
+
+    logger.info('loaded pretrained model from {}'.format(opt.pretrained_model))
+
+model.eval()
+with torch.no_grad():
+    if isinstance(model, torch.nn.DataParallel):
+        # pred = model.module.inference(image)
+        print("xx")
+    else:
+        # pred = model.inference(image)
+        print("yy")
+
+
+def _save_checkpoint(self, step):
+    if step >= self.train_conf['SNAPSHOT_BEGIN'] and step % (self.train_conf['SNAPSHOT_EPOCH'] + 1) == 0:
+        checkpoint_path = os.path.join(self.data_conf['save_model_dir'], f'checkpoint_step_{step}.pt')
+        model_state_dict = self.model.module.state_dict() if isinstance(self.model,
+                                                                        torch.nn.DataParallel) else self.model.state_dict()
+        torch.save({
+            'step': step,
+            'model_state_dict': model_state_dict,
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'loss': self.criterion
+        }, checkpoint_path)
+        logger.info(f"Checkpoint saved at step {step} to {checkpoint_path}")
+
+        # 只保留最近的10个检查点
+        checkpoints = sorted(
+            [f for f in os.listdir(self.data_conf['save_model_dir']) if f.startswith('checkpoint_step_')])
+        for old_checkpoint in checkpoints[:-10]:
+            os.remove(os.path.join(self.data_conf['save_model_dir'], old_checkpoint))
+```
+
+在推理的时候报错
+raise RuntimeError('Error(s) in loading state_dict for {}:\n\t{}'.format(
+RuntimeError: Error(s) in loading state_dict for DataParallel:
+Missing key(s) in state_dict: "module.feat_encoder.0.weight", "module.feat_encoder.1.weight", "
+module.feat_encoder.1.bias", "module.feat_encoder.1.running_mean", "module.feat_encoder.1.running_var",
+Unexpected key(s) in state_dict: "module.step", "module.model_state_dict", "module.optimizer_state_dict", "module.loss".
+
+---
+
+```python
+    def _save_best_model(self, step, loss):
+    if step >= self.train_conf['SNAPSHOT_BEGIN'] and step % (self.train_conf['SNAPSHOT_EPOCH'] + 1) == 0:
+        best_model_path = os.path.join(self.data_conf['save_model_dir'], 'best_model.pt')
+        model_state_dict = self.model.module.state_dict() if isinstance(self.model,
+                                                                        torch.nn.DataParallel) else self.model.state_dict()
+        torch.save({
+            'step': step,
+            'model_state_dict': model_state_dict,
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'loss': loss
+        }, best_model_path)
+        logger.info(f"Best model saved at step {step} with validation loss {loss:.4f} to {best_model_path}")
+```
+这样保存的模型怎么加载啊?
+
+---
+
+为什么推理只在一张卡上面
+```python
+def main(opt):
+    conf = new_start_config
+    train_conf = conf['train']
+    if opt.dev:
+        data_conf = conf['dev']
+    else:
+        fix_seed(train_conf['seed'])
+        data_conf = conf['test']
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    # 禁用 cuDNN autotuner
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
+    # 强制禁用 cuDNN 后端
+    torch.backends.cudnn.enabled = False
+    logger.info(f"seed: {train_conf['seed']}")
+
+    img_path_list, style_batch_data = get_files(data_conf['style_img_path'], data_conf['suffix']), []
+    random.shuffle(img_path_list)
+    style_samples = write_pkl(data_conf['style_pkl_file_path'], 'generate.pkl',
+                              img_path_list[:train_conf['style_img_num']])
+    generate_dataset = FontDataset(is_train=opt.dev, is_dev=opt.dev)
+    generate_loader = DataLoader(generate_dataset, 1, True,
+                                 drop_last=False,
+                                 collate_fn=generate_dataset.collect_function,
+                                 num_workers=data_conf['NUM_THREADS'],
+                                 pin_memory=True)
+    for i, img in enumerate(style_samples):
+        img = img['img'] / 255.0
+        char_img_tensor = torch.tensor(img, dtype=torch.float32).unsqueeze(0)
+        style_batch_data.append(char_img_tensor)
+    image = torch.stack([item for item in style_batch_data]).unsqueeze(0)
+    model = FontModel(
+        d_model=train_conf['d_model'],
+        num_head=train_conf['num_head'],
+        num_encoder_layers=train_conf['num_encoder_layers'],
+        num_glyph_encoder_layers=train_conf['num_glyph_encoder_layers'],
+        num_gly_decoder_layers=train_conf['num_gly_decoder_layers'],
+        dim_feedforward=train_conf['dim_feedforward'],
+        dropout=train_conf['dropout'],
+        activation="relu",
+        normalize_before=True,
+        return_intermediate_dec=True,
+        train_conf=train_conf,
+    )
+    if torch.cuda.device_count() > 1:
+        logger.info(f"Using {torch.cuda.device_count()} GPUs")
+        model = torch.nn.DataParallel(model)
+    elif torch.cuda.is_available():
+        logger.info("Using single GPU")
+    else:
+        logger.info("Using CPU")
+    model.to(device)
+    if len(opt.pretrained_model) > 0:
+        state_dict = torch.load(opt.pretrained_model)
+        model_state_dict = state_dict['model_state_dict']
+        if isinstance(model, torch.nn.DataParallel):
+            model.module.load_state_dict(model_state_dict)
+        else:
+            model.load_state_dict(model_state_dict)
+        logger.info('loaded pretrained model from {}'.format(opt.pretrained_model))
+
+    model.eval()
+    with torch.no_grad():
+        if isinstance(model, torch.nn.DataParallel):
+            coors_path = model.module.inference(image, generate_loader)
+            print("xx")
+        else:
+            coors_path = model.inference(image, generate_loader)
+            print("yy")
+        logger.info('result coordinates path:{}'.format(coors_path))
+```
+
+
+```
+
+---
+
+---
+
 
 
 ---
 
 ---
- 
 
-
----
-
----
- 
 
 
 ---
 
 ---
- 
 
-
----
-
----
- 
 
 
 ---
 
 ---
- 
 
-
----
-
----
- 
 
 
 ---
 
 ---
- 
 
-
----
----
- 
 
 
 ---
 ---
- 
 
-
----
----
- 
 
 
 ---
 ---
- 
 
-
----
----
- 
 
 
 ---
 ---
- 
 
-
----
----
- 
 
 
 ---
 ---
- 
 
-
----
----
- 
 
 
 ---
 ---
- 
 
-
----
----
- 
 
 
 ---
 ---
- 
 
-
----
----
- 
 
 
 ---
 ---
- 
 
-
----
----
- 
 
 
 ---
 ---
- 
 
-
----
----
- 
 
 
 ---
 ---
- 
+
+
+
+---
+---
+
+
+
+---
+---
+
+
+
+---
+---
+
+
+
+---
+---
+
+
+
+---
+---
+
+
+
+---
+---
+
+
+
+---
+---
+
+
+
+---
+---
+
+
+
+---
+---
+
 
 
 ---

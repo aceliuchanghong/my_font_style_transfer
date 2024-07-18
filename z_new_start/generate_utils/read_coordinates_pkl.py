@@ -6,7 +6,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 
-def rotate_point(point, angle, center):
+def r_point(point, angle, center):
     x, y = point
     cx, cy = center
     cos_theta = np.cos(angle)
@@ -39,9 +39,9 @@ def draw_character_strokes(coordinates, image_size=(256, 256), scale_factor=1, n
                     y1 += np.random.randint(-nums, nums)
                     x2 += np.random.randint(-nums, nums)
                     y2 += np.random.randint(-nums, nums)
-                rotation_angle = math.pi * noise * (2 * np.random.rand() - 1)
-                x1, y1 = rotate_point((x1, y1), rotation_angle, center)
-                x2, y2 = rotate_point((x2, y2), rotation_angle, center)
+                r_angle = math.pi * noise * (2 * np.random.rand() - 1)
+                x1, y1 = r_point((x1, y1), r_angle, center)
+                x2, y2 = r_point((x2, y2), r_angle, center)
                 draw.line(
                     (x1, y1, x2, y2),
                     fill=0, width=2  # 使用黑色线条

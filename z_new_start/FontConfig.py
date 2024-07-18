@@ -9,7 +9,7 @@ new_start_config = {
         'PER_BATCH': 2,
         'NUM_THREADS': 0,
         'style_img_path': r'D:\aProject\py\my_font_style_transfer\style_samples',
-        'save_pkl_file_path': r'D:\aProject\py\my_font_style_transfer\Saved',
+        'style_pkl_file_path': r'D:\aProject\py\my_font_style_transfer\Saved',
         'suffix': '.png',
     },
     'dev': {
@@ -22,7 +22,7 @@ new_start_config = {
         'PER_BATCH': 24,
         'NUM_THREADS': 8,
         'style_img_path': '/mnt/data/llch/my_font_style_transfer/style_samples',
-        'save_pkl_file_path': '/mnt/data/llch/Saved',
+        'style_pkl_file_path': '/mnt/data/llch/my_font_style_transfer/Saved',
         'suffix': '.png',
     },
     'train': {
@@ -30,8 +30,8 @@ new_start_config = {
         'num_epochs': 20,
         'LEARNING_RATE': 1e-4,
         'MAX_STEPS': 13000,
-        'SNAPSHOT_BEGIN': 5000,
-        'SNAPSHOT_EPOCH': 500,
+        'SNAPSHOT_BEGIN': 3000,
+        'SNAPSHOT_EPOCH': 499,
         'd_model': 512,
         'num_head': 8,
         'num_encoder_layers': 2,

@@ -274,19 +274,20 @@ class FontModel(nn.Module):
         return pred_sequence
 
     @torch.jit.export
-    def inference(self, img_list):
+    def inference(self, images, generate_dataset, generate_loader):
         self.eval()
         device = next(self.parameters()).device
-        outputs = []
+        loader_iter = iter(generate_loader)
         with torch.no_grad():
-            for img in img_list:
-                img = img.unsqueeze(0).to(device)
-                std_coors = torch.zeros(
-                    (1, self.train_conf['max_stroke'], self.train_conf['max_per_stroke_point'], 4)).to(device)
-                char_img_gt = img
-                pred_sequence = self.forward(img, std_coors, char_img_gt)
-                outputs.append(pred_sequence.cpu().numpy())
-        return outputs
+            from tqdm import tqdm
+            for i in tqdm(range(len(generate_dataset)), desc="Processing generating", unit="batch"):
+                data = next(loader_iter)
+                from torch.cuda.amp import autocast
+                with autocast():
+                    pred_sequence = self.forward(
+                        images.to(device), data['std_coors'].to(device), data['char_img'].to(device)
+                    )
+        return 'outputs'
 
 
 def generate_square_subsequent_mask(sz: int) -> Tensor:
