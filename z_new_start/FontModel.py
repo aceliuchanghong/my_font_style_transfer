@@ -4,9 +4,11 @@ from models.transformer import PositionalEncoding, TransformerEncoderLayer, Tran
 from models.encoder import Content_TR
 from einops import rearrange, repeat
 import logging
-from z_new_start.FontTransformer import TransformerDecoderLayer, TransformerDecoder
 from torch import nn, Tensor
 import torch
+from z_new_start.FontTransformer import TransformerDecoderLayer, TransformerDecoder
+
+from z_new_start.FontUtils import CoorsRender, _get_coors_decode
 
 # 设置日志
 logging.basicConfig(level=logging.INFO)
@@ -30,6 +32,7 @@ class FontModel(nn.Module):
                  ):
         super(FontModel, self).__init__()
         self.train_conf = train_conf
+        self.dropout = dropout
 
         # encoder
         self.feat_encoder = self._build_feature_encoder()
@@ -276,7 +279,7 @@ class FontModel(nn.Module):
     @torch.jit.export
     def inference(self, images, generate_dataset, generate_loader):
         self.eval()
-        device = next(self.parameters()).device
+        device, pred = next(self.parameters()).device, []
         loader_iter = iter(generate_loader)
         with torch.no_grad():
             from tqdm import tqdm
@@ -287,7 +290,10 @@ class FontModel(nn.Module):
                     pred_sequence = self.forward(
                         images.to(device), data['std_coors'].to(device), data['char_img'].to(device)
                     )
-        return 'outputs'
+                    pred.append(pred_sequence)
+            outputs = _get_coors_decode(CoorsRender(), pred=pred, images=images, dropout=self.dropout,
+                                        gd=generate_dataset)
+        return outputs
 
 
 def generate_square_subsequent_mask(sz: int) -> Tensor:

@@ -45,7 +45,7 @@ class FontTrainer:
                         return
                     data = next(train_loader_iter)
                     self._train_iter(data, step)
-                    if step % self.accumulation_steps == 0:
+                    if step % self.accumulation_steps and step > 1 == 0:
                         self._save_checkpoint(step)
                         val_loss = self._valid_iter(step)
                         if val_loss < self.best_loss:

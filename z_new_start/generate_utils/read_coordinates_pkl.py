@@ -16,13 +16,13 @@ def r_point(point, angle, center):
     return x_new, y_new
 
 
-def draw_character_strokes(coordinates, image_size=(256, 256), scale_factor=1, noise=0.0):
+def draw_character_strokes(coordinates, image_size=(256, 256), scale_factor=1, degree=0.0):
     normalized_coordinates = normalize_coordinates(coordinates, image_size, scale_factor)
     images = {}
     for char, strokes in normalized_coordinates.items():
         if strokes is None or isinstance(strokes, str):
             continue
-        nums = int(100 * noise)
+        nums = int(100 * degree)
         center = (image_size[0] / 2, image_size[1] / 2)
         image = Image.new('1', image_size, 1)  # 创建黑白图像
         draw = ImageDraw.Draw(image)
@@ -32,14 +32,14 @@ def draw_character_strokes(coordinates, image_size=(256, 256), scale_factor=1, n
                 x2, y2, _, _ = stroke[i + 1]
                 temp1 = np.random.rand()
                 temp2 = np.random.rand()
-                if temp1 < noise:
+                if temp1 < degree:
                     continue
-                if temp2 < noise:
+                if temp2 < degree:
                     x1 += np.random.randint(-nums, nums)
                     y1 += np.random.randint(-nums, nums)
                     x2 += np.random.randint(-nums, nums)
                     y2 += np.random.randint(-nums, nums)
-                r_angle = math.pi * noise * (2 * np.random.rand() - 1)
+                r_angle = math.pi * degree * (2 * np.random.rand() - 1)
                 x1, y1 = r_point((x1, y1), r_angle, center)
                 x2, y2 = r_point((x2, y2), r_angle, center)
                 draw.line(
@@ -92,7 +92,7 @@ def main(opt):
         os.makedirs(out_path)
     coor = pickle.load(open(opt.pkl, 'rb'))
     del coor['font_name']
-    images = draw_character_strokes(coor, scale_factor=opt.scale, noise=opt.noise)
+    images = draw_character_strokes(coor, scale_factor=opt.scale, degree=opt.degree)
     for char, image in images.items():
         image.save(f"{out_path}/{char}.png")  # 保存图像
 
@@ -104,12 +104,13 @@ if __name__ == '__main__':
     python read_coordinates_pkl.py
     python read_coordinates_pkl.py --pkl ../ABtest/files/AB_coors/AliHYAiHei.pkl
     python read_coordinates_pkl.py --pkl ../ABtest/files/LXGWWenKaiGB-Light.pkl
-    python read_coordinates_pkl.py --pkl ../ABtest/files/LXGWWenKaiGB-Light.pkl --noise 0.03
+    python read_coordinates_pkl.py --pkl ../ABtest/files/LXGWWenKaiGB-Light.pkl --degree 0.03
+    python read_coordinates_pkl.py --pkl ../ABtest/files/AB_coors/HYXiDengXianJ.pkl --degree 0.03
     """
     parser = argparse.ArgumentParser()
     parser.add_argument('--out_path', default='coors_test_path', help='输出图片目录')
     parser.add_argument('--pkl', default='../ABtest/files/AB_coors/HYAlzheimer.pkl', help='读取文件')
     parser.add_argument('--scale', default=0.27, type=float, help='图片缩放尺寸')
-    parser.add_argument('--noise', default=0.05, type=float)
+    parser.add_argument('--degree', default=0.05, type=float)
     opt = parser.parse_args()
     main(opt)

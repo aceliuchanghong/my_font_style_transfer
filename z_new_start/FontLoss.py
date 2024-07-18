@@ -1,6 +1,16 @@
 import torch
 import torch.nn as nn
 
+from z_new_start.FontUtils import Render
+
+
+class RenderLoss(Render):
+    def __init__(self):
+        super(RenderLoss, self).__init__()
+
+    def renderIt(self, *arg, **kwargs) -> str:
+        return str(kwargs['dropout'])
+
 
 class FontLoss(nn.Module):
     def __init__(self, coordinate_weight=1.0, stroke_weight=0.5):
@@ -23,6 +33,15 @@ class FontLoss(nn.Module):
 
         assert not torch.isnan(total_loss).any(), "NaN values in total_loss"
         return total_loss
+
+
+class FontLoss2(Render):
+    def __init__(self):
+        super(FontLoss2, self).__init__()
+
+    def renderIt(self, *arg, **kwargs) -> str:
+        print(kwargs['dropout'])
+        return str(self.dice)
 
 
 if __name__ == '__main__':

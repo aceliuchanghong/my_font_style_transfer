@@ -42,5 +42,6 @@ new_start_config = {
         'max_stroke': 20,
         'max_per_stroke_point': 200,
         'style_img_num': 12,
+        'keys': 'dropout'
     },
 }

@@ -1,4 +1,37 @@
+import math
+import random
 import torch
+from typing import Any
+from abc import ABC, abstractmethod
+
+from z_new_start.FontConfig import new_start_config
+
+
+class Render(ABC):
+    def __init__(self):
+        self.degree = random.random()
+
+    def __call__(self, *args, **kwargs):
+        print(args[0], args[1])
+        return args[0]
+
+    def __getitem__(self, *args):
+        return math.cos(1 / 3 * math.pi)
+
+    @abstractmethod
+    def renderIt(self, *arg, **kwargs: Any) -> str:
+        pass
+
+
+def get_pkl(pred):
+    for i, _ in enumerate(pred):
+        # print(_.shape)
+        print(_)
+    return ''
+
+
+def _get_coors_decode(Render, **kw):
+    return Render.renderIt(Render.dice, keys=kw)
 
 
 def restore_coordinates(padded_coors, max_stroke=20, max_per_stroke_point=200):
@@ -24,6 +57,19 @@ def restore_coordinates(padded_coors, max_stroke=20, max_per_stroke_point=200):
             restored_coordinates.append(stroke)
 
     return restored_coordinates
+
+
+class CoorsRender(Render):
+    def __init__(self):
+        super(CoorsRender, self).__init__()
+
+    def renderIt(self, *arg, **kwargs: Any) -> str:
+        if self.degree > kwargs['keys'][new_start_config['train']['keys']]:
+            path = get_pkl(kwargs['keys']['pred'])
+        else:
+            bs, _n, _, h, w = kwargs['keys']['images'].shape
+            path = self(kwargs['keys']['pred'], kwargs['keys']['gd'], _)
+        return path
 
 
 if __name__ == '__main__':
