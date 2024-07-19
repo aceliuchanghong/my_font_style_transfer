@@ -79,9 +79,9 @@ def normalize_coordinates(coordinates, image_size, scale_factor):
         normalized[char] = norm_strokes
 
         # 添加调试信息
-        print(f"Character: {char}")
-        print(f"Original strokes: {strokes}")
-        print(f"Normalized strokes: {norm_strokes}")
+        # print(f"Character: {char}")
+        # print(f"Original strokes: {strokes}")
+        # print(f"Normalized strokes: {norm_strokes}")
 
     return normalized
 

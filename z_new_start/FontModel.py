@@ -291,7 +291,7 @@ class FontModel(nn.Module):
                         images.to(device), data['std_coors'].to(device), data['char_img'].to(device)
                     )
                     pred.append(pred_sequence)
-            outputs = _get_coors_decode(CoorsRender(), pred=pred, images=images, dropout=self.dropout,
+            outputs = _get_coors_decode(CoorsRender(), p=pred, images=images, dropout=self.dropout,
                                         gd=generate_dataset)
         return outputs
 

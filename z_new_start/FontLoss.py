@@ -4,14 +4,6 @@ import torch.nn as nn
 from z_new_start.FontUtils import Render
 
 
-class RenderLoss(Render):
-    def __init__(self):
-        super(RenderLoss, self).__init__()
-
-    def renderIt(self, *arg, **kwargs) -> str:
-        return str(kwargs['dropout'])
-
-
 class FontLoss(nn.Module):
     def __init__(self, coordinate_weight=1.0, stroke_weight=0.5):
         super(FontLoss, self).__init__()

@@ -28,9 +28,10 @@ class FontDataset(Dataset):
         self.max_stroke = self.config['train']['max_stroke']
         self.max_per_stroke_point = self.config['train']['max_per_stroke_point']
         self.num_img = self.config['train']['style_img_num']
+        self.suffix = '.pkl'
 
-        coors_pkl_list_all = get_files(self.coordinate_path, '.pkl')
-        pics_pkl_list_all = get_files(self.pic_path, '.pkl')
+        coors_pkl_list_all = get_files(self.coordinate_path, self.suffix)
+        pics_pkl_list_all = get_files(self.pic_path, self.suffix)
 
         self.can_be_used_font = []
         for i, font_pic_pkl in enumerate(pics_pkl_list_all):
