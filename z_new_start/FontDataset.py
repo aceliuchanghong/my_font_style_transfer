@@ -43,12 +43,20 @@ class FontDataset(Dataset):
         self.font_data = []
         self.same_style_img_dict = {}
         for i, font_name in enumerate(self.can_be_used_font):
-            font_pic_pkl = os.path.join(self.pic_path, font_name + '.pkl')
-            font_coors_pkl = os.path.join(self.coordinate_path, font_name + '.pkl')
-
-            font_pics_list = pickle.load(open(font_pic_pkl, 'rb'))
-            font_coors_list = pickle.load(open(font_coors_pkl, 'rb'))
-
+            font_pic_pkl = os.path.join(self.pic_path, font_name + self.suffix)
+            font_coors_pkl = os.path.join(self.coordinate_path, font_name + self.suffix)
+            try:
+                font_pics_list = pickle.load(open(font_pic_pkl, 'rb'))
+            except Exception as e:
+                # print(f"Error loading pic pickle file: {e}")
+                # print(font_pic_pkl)
+                break
+            try:
+                font_coors_list = pickle.load(open(font_coors_pkl, 'rb'))
+            except Exception as e:
+                # print(f"Error loading coors pickle file: {e}")
+                # print(font_coors_pkl)
+                break
             # 获取同一种字体的self.num_img个图片
             x = self.num_img if len(font_pics_list) >= self.num_img else len(font_pics_list)
             random_index = random.sample(range(len(font_pics_list)), x)

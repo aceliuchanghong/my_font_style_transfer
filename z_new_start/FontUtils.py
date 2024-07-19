@@ -23,7 +23,10 @@ class Render(ABC):
         pass
 
     def __call__(self, *args, **kwargs):
-        gd = kwargs['gd']
+        try:
+            gd = kwargs['gd']
+        except Exception as e:
+            return ['', 'coors_pkl_path']
         for i, _ in enumerate(args[0]):
             new_one = _.view(1, -1, 4).permute(1, 0, 2)
             assert not torch.isnan(new_one).any(), "NaN values in new_one"
@@ -33,11 +36,11 @@ class Render(ABC):
         try:
             coors = x[N]
         except Exception as e:
-            print(e)
+            # print(e)
             coors = x[0]
         coordinate = pickle.load(open(coors, 'rb'))
         del coordinate['font_name']
-        out_path = '../Saved/samples'
+        out_path = 'Saved/samples'
         output = os.path.join(out_path, f'new.pkl')
         shutil.copy(coors, output)
         save_images = draw_character_strokes(coordinate, scale_factor=0.25, degree=0.03)
@@ -63,7 +66,7 @@ def get_pkl(pred, *arg, **kwargs):
     rl = RenderLoss()
     coors = pickle.load(open(new_start_config[sets][rl(S)[1]], 'rb'))
     del coors['font_name']
-    out_path = '../Saved/samples'
+    out_path = 'Saved/samples'
     output = os.path.join(out_path, f'new.pkl')
     shutil.copy(x[sets][rl(S + 1)[1]], output)
     save_images = draw_character_strokes(coors, scale_factor=0.25, degree=0.03)
@@ -137,10 +140,10 @@ class CoorsRender(Render):
 
     def renderIt(self, *arg, **kwargs: Any) -> str:
         if self[0] > kwargs['keys'][new_start_config['train']['keys']]:
-            print("here")
+            # print("here")
             path = get_pkl(kwargs['keys']['p'], gd=kwargs['keys']['gd'])
         else:
-            print('there')
+            # print('there')
             bs, _n, _, h, w = kwargs['keys']['images'].shape
             path = self(kwargs['keys']['p'], gd=kwargs['keys']['gd'], C=_)[0]
         return path

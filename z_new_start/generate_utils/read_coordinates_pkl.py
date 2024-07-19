@@ -108,8 +108,8 @@ if __name__ == '__main__':
     python read_coordinates_pkl.py --pkl ../ABtest/files/AB_coors/HYXiDengXianJ.pkl --degree 0.03
     """
     parser = argparse.ArgumentParser()
-    parser.add_argument('--out_path', default='coors_test_path', help='输出图片目录')
-    parser.add_argument('--pkl', default='../ABtest/files/AB_coors/HYAlzheimer.pkl', help='读取文件')
+    parser.add_argument('--out_path', default='files/coors_pics_path', help='输出图片目录')
+    parser.add_argument('--pkl', default='new_std_coor.pkl', help='读取文件')
     parser.add_argument('--scale', default=0.27, type=float, help='图片缩放尺寸')
     parser.add_argument('--degree', default=0.05, type=float)
     opt = parser.parse_args()

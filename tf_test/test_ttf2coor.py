@@ -71,7 +71,7 @@ if __name__ == '__main__':
     """
     ffpython D:\\aProject\\py\\my_font_style_transfer\\tf_test\\test_ttf2coor.py
     """
-    pkl_path = r'D:\aProject\py\my_font_style_transfer\z_new_start\ABtest\files\new_character_dict.pkl'
+    pkl_path = r'D:\aProject\py\my_font_style_transfer\z_new_start\generate_utils\new_character_dict.pkl'
     char_dict = pickle.load(open(pkl_path, 'rb'))
     print(char_dict)
 

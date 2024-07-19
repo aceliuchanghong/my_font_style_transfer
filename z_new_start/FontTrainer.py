@@ -45,7 +45,7 @@ class FontTrainer:
                         return
                     data = next(train_loader_iter)
                     self._train_iter(data, step)
-                    if step % self.accumulation_steps and step > 1 == 0:
+                    if step > 1 and step % self.accumulation_steps == 0:
                         self._save_checkpoint(step)
                         val_loss = self._valid_iter(step)
                         if val_loss < self.best_loss:
@@ -121,7 +121,7 @@ class FontTrainer:
         return avg_loss
 
     def _save_checkpoint(self, step):
-        if step >= self.train_conf['SNAPSHOT_BEGIN'] and step % (self.train_conf['SNAPSHOT_EPOCH'] + 1) == 0:
+        if step >= self.train_conf['SNAPSHOT_BEGIN'] and step % (self.train_conf['SNAPSHOT_EPOCH']) == 0:
             checkpoint_path = os.path.join(self.data_conf['save_model_dir'], f'checkpoint_step_{step}.pt')
             model_state_dict = self.model.module.state_dict() if isinstance(self.model,
                                                                             torch.nn.DataParallel) else self.model.state_dict()
@@ -140,7 +140,7 @@ class FontTrainer:
                 os.remove(os.path.join(self.data_conf['save_model_dir'], old_checkpoint))
 
     def _save_best_model(self, step, loss):
-        if step >= self.train_conf['SNAPSHOT_BEGIN'] and step % (self.train_conf['SNAPSHOT_EPOCH'] + 1) == 0:
+        if step >= self.train_conf['SNAPSHOT_BEGIN'] and step % (self.train_conf['SNAPSHOT_EPOCH']) == 0:
             best_model_path = os.path.join(self.data_conf['save_model_dir'], 'best_model.pt')
             model_state_dict = self.model.module.state_dict() if isinstance(self.model,
                                                                             torch.nn.DataParallel) else self.model.state_dict()
