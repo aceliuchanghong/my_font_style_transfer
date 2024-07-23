@@ -16,7 +16,7 @@ def r_point(point, angle, center):
     return x_new, y_new
 
 
-def draw_character_strokes(coordinates, image_size=(256, 256), scale_factor=1, degree=0.02):
+def draw_character_strokes(coordinates, image_size=(256, 256), scale_factor=1, degree=0.015):
     normalized_coordinates = normalize_coordinates(coordinates, image_size, scale_factor)
     images = {}
     for char, strokes in normalized_coordinates.items():

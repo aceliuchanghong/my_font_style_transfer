@@ -1,5 +1,6 @@
 import argparse
 import logging
+import math
 import pickle
 import torch
 import sys
@@ -48,7 +49,7 @@ def main(opt):
 
     new_dic = pickle.load(open(os.path.join(data_conf['style_pkl_file_path'], 'generate.pkl'), 'rb'))
     try:
-        seed = int(np.sum(new_dic[0]['img']) / 1000)
+        seed = int(abs(math.sin(np.sum(new_dic[0]['img'])) * 1000))
     except Exception as e:
         seed = train_conf['seed']
     fix_seed(seed)

@@ -1,8 +1,4 @@
-import math
 import os
-import pickle
-import random
-import shutil
 import threading
 
 import torch
@@ -70,7 +66,7 @@ class Render(ABC):
         del coordinate['font_name']
         out_path = 'Saved/samples'
         output = os.path.join(out_path, f'new.pkl')
-        render = RenderProxy(coors)
+        render = RenderProxy(coordinate)
         ans = client_code(render, output)
         save_images = draw_character_strokes(coordinate, scale_factor=0.25)
         for char, image in save_images.items():
@@ -241,11 +237,11 @@ class CoorsSubject:
             disturbed_stroke.append((x1, y1, p1, p2))
         return disturbed_stroke
 
-    def request(self, x: dict, path: str, degree=0.1, smooth_factor=25,
+    def request(self, x: dict, path: str, degree=0.3, smooth_factor=25,
                 angle_range=(-math.pi / 100, math.pi / 100),
                 scale_range=(0.998, 1.002),
                 shift_range=(-20, 20),
-                curve_range=(-0.00015, 0.00015)) -> str:
+                curve_range=(-0.00008, 0.00008)) -> str:
         self.generate_personality(angle_range, scale_range, shift_range, curve_range)
 
         self.output = {char: [self.disturb_stroke(stroke, degree, smooth_factor) for stroke in strokes] for
