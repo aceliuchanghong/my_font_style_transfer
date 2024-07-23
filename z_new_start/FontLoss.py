@@ -32,8 +32,7 @@ class FontLoss2(Render):
         super(FontLoss2, self).__init__()
 
     def renderIt(self, *arg, **kwargs) -> str:
-        print(kwargs['dropout'])
-        return str(self.dice)
+        return str(self.degree)
 
 
 if __name__ == '__main__':

@@ -16,7 +16,7 @@ def r_point(point, angle, center):
     return x_new, y_new
 
 
-def draw_character_strokes(coordinates, image_size=(256, 256), scale_factor=1, degree=0.0):
+def draw_character_strokes(coordinates, image_size=(256, 256), scale_factor=1, degree=0.02):
     normalized_coordinates = normalize_coordinates(coordinates, image_size, scale_factor)
     images = {}
     for char, strokes in normalized_coordinates.items():
@@ -91,7 +91,10 @@ def main(opt):
     if not os.path.exists(out_path):
         os.makedirs(out_path)
     coor = pickle.load(open(opt.pkl, 'rb'))
-    del coor['font_name']
+    try:
+        del coor['font_name']
+    except Exception as e:
+        pass
     images = draw_character_strokes(coor, scale_factor=opt.scale, degree=opt.degree)
     for char, image in images.items():
         image.save(f"{out_path}/{char}.png")  # 保存图像
@@ -111,6 +114,6 @@ if __name__ == '__main__':
     parser.add_argument('--out_path', default='files/coors_pics_path', help='输出图片目录')
     parser.add_argument('--pkl', default='new_std_coor.pkl', help='读取文件')
     parser.add_argument('--scale', default=0.27, type=float, help='图片缩放尺寸')
-    parser.add_argument('--degree', default=0.05, type=float)
+    parser.add_argument('--degree', default=0.025, type=float)
     opt = parser.parse_args()
     main(opt)
