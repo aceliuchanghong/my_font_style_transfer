@@ -123,6 +123,9 @@ class FontDataset(Dataset):
             if img['label'] == label:
                 std_img = img['img'] / 255.0
                 std_img_tensor = torch.tensor(std_img, dtype=torch.float32).unsqueeze(0)
+        if std_img_tensor is None:
+            # 如果没有找到匹配的 label，则使用一个默认的 Tensor
+            std_img_tensor = torch.zeros_like(char_img_tensor)
 
         # 对coors进行padding 使其长度一致 20 * 200 * 4
         # 1.每个字符最多包含的笔画数

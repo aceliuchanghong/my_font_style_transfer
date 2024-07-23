@@ -38,11 +38,19 @@ def main(opt):
     torch.backends.cudnn.enabled = False
 
     img_path_list, style_batch_data = get_files(data_conf['style_img_path'], data_conf['suffix']), []
+    if len(img_path_list) < train_conf['style_img_num']:
+        logger.error(
+            f"not enough images, at least {train_conf['style_img_num']} {data_conf['suffix']}s in {data_conf['style_img_path']}"
+        )
+        return
     style_samples = write_pkl(data_conf['style_pkl_file_path'], 'generate.pkl',
                               img_path_list[:train_conf['style_img_num']])
 
     new_dic = pickle.load(open(os.path.join(data_conf['style_pkl_file_path'], 'generate.pkl'), 'rb'))
-    seed = int(np.sum(new_dic[0]['img']) / 1000)
+    try:
+        seed = int(np.sum(new_dic[0]['img']) / 1000)
+    except Exception as e:
+        seed = train_conf['seed']
     fix_seed(seed)
     logger.info(f"seed: {seed}")
 
