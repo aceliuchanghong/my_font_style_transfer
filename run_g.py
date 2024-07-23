@@ -1,7 +1,8 @@
+from utils.util import fix_seed
 from z_new_start.FontDataset import FontDataset
 from z_new_start.FontUtils import CoorsRender, _get_coors_decode
 import torch
-
+fix_seed(859)
 tensor0 = torch.randn(1, 20, 200, 4)
 tensor1 = torch.randn(1, 20, 200, 4)
 pred = []

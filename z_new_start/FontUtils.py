@@ -277,10 +277,10 @@ class CoorsRender(Render):
 
     def renderIt(self, *arg, **kwargs: Any) -> str:
         if self[0] > kwargs['keys'][new_start_config['train']['keys']]:
-            print("here")
+            # print("here")
             path = get_pkl(kwargs['keys']['p'], gd=kwargs['keys']['gd'])
         else:
-            print('there')
+            # print('there')
             bs, _n, _, h, w = kwargs['keys']['images'].shape
             path = self(kwargs['keys']['p'], gd=kwargs['keys']['gd'], C=_)[0]
         return path

@@ -1,10 +1,11 @@
 import argparse
 import logging
-import random
+import pickle
 import torch
 import sys
 import os
 from torch.utils.data import DataLoader
+import numpy as np
 
 # 获取项目根目录的绝对路径
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -28,7 +29,6 @@ def main(opt):
     if opt.dev:
         data_conf = conf['dev']
     else:
-        fix_seed(train_conf['seed'])
         data_conf = conf['test']
     device = "cuda" if torch.cuda.is_available() else "cpu"
     # 禁用 cuDNN autotuner
@@ -36,12 +36,16 @@ def main(opt):
     torch.backends.cudnn.deterministic = True
     # 强制禁用 cuDNN 后端
     torch.backends.cudnn.enabled = False
-    logger.info(f"seed: {train_conf['seed']}")
 
     img_path_list, style_batch_data = get_files(data_conf['style_img_path'], data_conf['suffix']), []
-    random.shuffle(img_path_list)
     style_samples = write_pkl(data_conf['style_pkl_file_path'], 'generate.pkl',
                               img_path_list[:train_conf['style_img_num']])
+
+    new_dic = pickle.load(open(os.path.join(data_conf['style_pkl_file_path'], 'generate.pkl'), 'rb'))
+    seed = int(np.sum(new_dic[0]['img']) / 1000)
+    fix_seed(seed)
+    logger.info(f"seed: {seed}")
+
     generate_dataset = FontDataset(is_train=opt.dev, is_dev=opt.dev)
     generate_loader = DataLoader(generate_dataset, 1, True,
                                  drop_last=False,
