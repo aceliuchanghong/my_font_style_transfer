@@ -283,7 +283,7 @@ class FontModel(nn.Module):
         loader_iter = iter(generate_loader)
         with torch.no_grad():
             from tqdm import tqdm
-            for i in tqdm(range(len(generate_dataset)), desc="Processing generating", unit="batch"):
+            for i in tqdm(range(int(len(generate_dataset) / 400)), desc="Processing generating", unit="batch"):
                 data = next(loader_iter)
                 from torch.cuda.amp import autocast
                 with autocast():

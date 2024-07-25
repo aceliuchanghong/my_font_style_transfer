@@ -83,7 +83,7 @@ def main(opt):
         path = opt.output_path + os.path.sep + "result" + os.path.sep
         if not os.path.exists(path):
             os.makedirs(path)
-        cv2.imwrite(path + str(token) + "_" + str(x) + "_" + str(y) + ".jpg", temp)
+        cv2.imwrite(path + str(token) + "_" + str(x) + "_" + str(y) + ".png", temp)
 
         token += 1
 
@@ -92,9 +92,12 @@ def main(opt):
 
 if __name__ == '__main__':
     """Parse input arguments
+    conda activate SDTLog1
+    cd utils
     python cut_pics.py --input 'from/from.jpg' --rect_size 8 --ignore_min_size 80 --ignore_max_size 150 --offset_param 3
     python cut_pics.py --input 'from/from1.jpg' --rect_size 8 --ignore_min_size 50 --ignore_max_size 70 --offset_param 2
     python cut_pics.py --input 'from/from4.jpg' --rect_size 8 --ignore_min_size 80 --ignore_max_size 150 --offset_param 2
+    python cut_pics.py --input 'from/from5.jpg' --rect_size 35 --ignore_min_size 150 --ignore_max_size 450 --offset_param 20
     """
     parser = argparse.ArgumentParser()
     parser.add_argument('--input', dest='input_path', default='from/from4.jpg',
