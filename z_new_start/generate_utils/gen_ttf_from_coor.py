@@ -4,15 +4,18 @@ import fontforge
 import pickle
 import argparse
 
-def gen_ttf_from_coors(coordinates, output_path):
+
+def gen_ttf_from_coors(coordinates, output_path, font_name):
     """
     从坐标信息生成字体文件。
     coordinates (dict): 字符的坐标信息。
     output_path (str): 生成的字体文件的路径。
+    font_name (str): 字体的名称。
     """
     font = fontforge.font()
-    font_name = os.path.basename(output_path)
     font.fontname = font_name
+    font.fullname = font_name
+    font.familyname = font_name
 
     for char, char_coords in coordinates.items():
         if char == "font_name" or not char_coords:
@@ -27,7 +30,7 @@ def gen_ttf_from_coors(coordinates, output_path):
         glyph.width = 1000  # 设置字符宽度，可以根据需要调整
 
     font.generate(output_path)
-    print(output_path)
+    print(f"Generated font at {output_path} with name {font_name}")
 
 
 def main(opt):
@@ -36,7 +39,7 @@ def main(opt):
         os.makedirs(output_path)
     coors = pickle.load(open(opt.pkl, 'rb'))
     output = os.path.join(output_path, opt.name)
-    gen_ttf_from_coors(coors, output)
+    gen_ttf_from_coors(coors, output, opt.name)
 
 
 if __name__ == '__main__':
