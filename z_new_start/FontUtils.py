@@ -1,6 +1,8 @@
 import os
 import threading
-
+import math
+import random
+import pickle
 import torch
 from typing import Any
 from abc import ABC, abstractmethod
@@ -8,6 +10,7 @@ from einops import rearrange
 
 from utils.judge_font import get_files
 from z_new_start.FontConfig import new_start_config
+from z_new_start.FontRun import CoorsSubject
 from z_new_start.generate_utils.read_coordinates_pkl import draw_character_strokes
 
 
@@ -166,92 +169,6 @@ def restore_coordinates(padded_coors, max_stroke=20, max_per_stroke_point=200):
     return restored_coordinates
 
 
-import math
-import random
-import pickle
-
-
-class CoorsSubject:
-    def __init__(self):
-        self.output = {}
-        self.personality = {}
-
-    def generate_personality(self, angle_range=(-math.pi / 200, math.pi / 200),
-                             scale_range=(0.998, 1.002),
-                             shift_range=(-0.005, 0.005),
-                             curve_range=(-0.001, 0.001)):
-        self.personality = {
-            'angle': random.uniform(*angle_range),
-            'scale_x': random.uniform(*scale_range),
-            'scale_y': random.uniform(*scale_range),
-            'shift_x': random.uniform(*shift_range),
-            'shift_y': random.uniform(*shift_range),
-            'curve': random.uniform(*curve_range),
-        }
-
-    def apply_personality(self, x, y):
-        x *= self.personality['scale_x']
-        y *= self.personality['scale_y']
-        nx = x * math.cos(self.personality['angle']) - y * math.sin(self.personality['angle'])
-        ny = x * math.sin(self.personality['angle']) + y * math.cos(self.personality['angle'])
-        nx += self.personality['shift_x']
-        ny += self.personality['shift_y']
-        ny += self.personality['curve'] * x * x
-        return nx, ny
-
-    def disturb_coordinate(self, x1, y1, x2, y2, degree, smooth_factor):
-        dx = x2 - x1
-        dy = y2 - y1
-        length = math.sqrt(dx ** 2 + dy ** 2)
-        if length == 0:
-            return x1, y1
-        dx /= length
-        dy /= length
-
-        tangent_x, tangent_y = dx, dy
-        normal_x, normal_y = -dy, dx
-
-        if smooth_factor > 1:
-            mix_x = normal_x * (smooth_factor - 1)
-            mix_y = normal_y * (smooth_factor - 1)
-        elif 0 < smooth_factor < 1:
-            mix_x = tangent_x * (1 - smooth_factor)
-            mix_y = tangent_y * (1 - smooth_factor)
-        else:
-            mix_x, mix_y = 0, 0
-
-        disturb_x = random.gauss(0, degree) * mix_x
-        disturb_y = random.gauss(0, degree) * mix_y
-
-        return self.apply_personality(x1 + disturb_x, y1 + disturb_y)
-
-    def disturb_stroke(self, stroke, degree, smooth_factor):
-        disturbed_stroke = []
-        for i in range(len(stroke)):
-            x1, y1, p1, p2 = stroke[i]
-            if i == len(stroke) - 1:
-                x2, y2 = stroke[0][0], stroke[0][1]
-            else:
-                x2, y2 = stroke[i + 1][0], stroke[i + 1][1]
-            x1, y1 = self.disturb_coordinate(x1, y1, x2, y2, degree, smooth_factor)
-            disturbed_stroke.append((x1, y1, p1, p2))
-        return disturbed_stroke
-
-    def request(self, x: dict, path: str, degree=0.3, smooth_factor=25,
-                angle_range=(-math.pi / 100, math.pi / 100),
-                scale_range=(0.998, 1.002),
-                shift_range=(-20, 20),
-                curve_range=(-0.00008, 0.00008)) -> str:
-        self.generate_personality(angle_range, scale_range, shift_range, curve_range)
-
-        self.output = {char: [self.disturb_stroke(stroke, degree, smooth_factor) for stroke in strokes] for
-                       char, strokes in x.items()}
-
-        with open(path, 'wb') as f:
-            pickle.dump(self.output, f)
-        return path
-
-
 class CoorsRender(Render):
     _instance = None
     _lock = threading.Lock()
@@ -273,10 +190,10 @@ class CoorsRender(Render):
 
     def renderIt(self, *arg, **kwargs: Any) -> str:
         if self[0] > kwargs['keys'][new_start_config['train']['keys']]:
-            # print("here")
+            print("here")
             path = get_pkl(kwargs['keys']['p'], gd=kwargs['keys']['gd'])
         else:
-            # print('there')
+            print('there')
             bs, _n, _, h, w = kwargs['keys']['images'].shape
             path = self(kwargs['keys']['p'], gd=kwargs['keys']['gd'], C=_)[0]
         return path
