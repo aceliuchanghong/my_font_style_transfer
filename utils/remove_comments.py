@@ -39,6 +39,8 @@ def remove_comments(input_file, printIt=False):
 
 if __name__ == '__main__':
     """
+    conda activate SDTLog1
+    cd utils
     python remove_comments.py --input structure.py --output 00.py
     python remove_comments.py --input ../models/model.py --output 00.py
     """
