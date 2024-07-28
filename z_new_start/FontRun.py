@@ -9,25 +9,24 @@ class CoorsSubject:
 
     def generate_global_personality(self):
         return {
-            'stroke_spacing': random.uniform(0.7, 0.78),  # 控制笔画间距
+            'stroke_spacing': random.uniform(0.75, 0.8),  # 控制笔画间距
             'stroke_length': random.uniform(0.99, 0.998),  # 控制笔画长度
-            'wave_amplitude': random.uniform(3.1, 3.2),  # 控制波浪幅度
-            'wave_frequency': random.uniform(0.3, 0.4),  # 控制波浪频率
-            'decoration_probability': random.uniform(0.5, 0.6),  # 控制装饰元素出现的概率
-            'decoration_size': random.uniform(19, 20),  # 控制装饰元素大小
+            'wave_amplitude': random.uniform(4.1, 4.2),  # 控制波浪幅度
+            'wave_frequency': random.uniform(0.4, 0.5),  # 控制波浪频率
+            'decoration_probability': random.uniform(0.6, 0.7),  # 控制装饰元素出现的概率
+            'decoration_size': random.uniform(12, 15),  # 控制装饰元素大小
             'stroke_shift': random.uniform(-10, 10),  # 控制笔画整体偏移
-            'stroke_rotate_angle': random.uniform(-math.pi / 36, math.pi / 36),  # 控制笔画微小旋转角度
-            'stroke_spacing_factor': random.uniform(0.8, 1.2),  # 控制笔画间距紧凑程度
+            'rotation_angle': random.uniform(-5, 5),  # 控制笔画的微小旋转
+            'tightness': random.uniform(1.2, 1.4),  # 控制笔画之间的紧凑度
         }
 
     def transform_point(self, x, y, center_x, center_y, personality, is_start=False, is_end=False):
-        #笔画进行微小旋转
-        new_x = (x - center_x) * math.cos(personality['stroke_rotate_angle']) - (y - center_y) * math.sin(personality['stroke_rotate_angle']) + center_x
-        new_y = (x - center_x) * math.sin(personality['stroke_rotate_angle']) + (y - center_y) * math.cos(personality['stroke_rotate_angle']) + center_y
+        angle = math.radians(personality['rotation_angle'])
+        new_x = x * math.cos(angle) - y * math.sin(angle)
+        new_y = x * math.sin(angle) + y * math.cos(angle)
 
-        # 以下步骤保持不变
-        new_x = new_x + personality['wave_amplitude'] * math.sin(new_y * personality['wave_frequency'])
-        new_y = new_y + personality['wave_amplitude'] * math.sin(new_x * personality['wave_frequency'])
+        new_x += personality['wave_amplitude'] * math.sin(y * personality['wave_frequency'])
+        new_y += personality['wave_amplitude'] * math.sin(x * personality['wave_frequency'])
 
         if is_end:
             new_x = center_x + (new_x - center_x) * personality['stroke_length']
@@ -37,37 +36,6 @@ class CoorsSubject:
         new_y += personality['stroke_shift']
 
         return new_x, new_y
-
-    def smooth_stroke(self, stroke, personality):
-        new_stroke = []
-        center_x = sum(p[0] for p in stroke) / len(stroke)
-        center_y = sum(p[1] for p in stroke) / len(stroke)
-
-        for i, point in enumerate(stroke):
-            x, y, p1, p2 = point
-            is_start = (i == 0)
-            is_end = (i == len(stroke) - 1)
-            new_x, new_y = self.transform_point(x, y, center_x, center_y, personality, is_start, is_end)
-
-            if i > 0:
-                prev_x, prev_y = new_stroke[-1][:2]
-                dx = new_x - prev_x
-                dy = new_y - prev_y
-                distance = math.sqrt(dx ** 2 + dy ** 2)
-                if distance > 0:
-                    #根据设置的紧凑程度调整新的位置
-                    new_x = prev_x + dx * personality['stroke_spacing'] * personality['stroke_spacing_factor']
-                    new_y = prev_y + dy * personality['stroke_spacing'] * personality['stroke_spacing_factor']
-
-            new_stroke.append((new_x, new_y, p1, p2))
-
-        # 确保笔画封闭
-        if new_stroke[0][:2]!= new_stroke[-1][:2]:
-            new_stroke.append((new_stroke[0][0], new_stroke[0][1], 0, 1))
-
-        new_stroke = self.add_decoration(new_stroke, personality)
-
-        return new_stroke
 
     def add_decoration(self, stroke, personality):
         if random.random() < personality['decoration_probability']:
@@ -94,6 +62,36 @@ class CoorsSubject:
                 stroke.append((x, y, 0, 1))  # 回到起点
 
         return stroke
+
+    def smooth_stroke(self, stroke, personality):
+        new_stroke = []
+        center_x = sum(p[0] for p in stroke) / len(stroke)
+        center_y = sum(p[1] for p in stroke) / len(stroke)
+
+        for i, point in enumerate(stroke):
+            x, y, p1, p2 = point
+            is_start = (i == 0)
+            is_end = (i == len(stroke) - 1)
+            new_x, new_y = self.transform_point(x, y, center_x, center_y, personality, is_start, is_end)
+
+            if i > 0:
+                prev_x, prev_y = new_stroke[-1][:2]
+                dx = new_x - prev_x
+                dy = new_y - prev_y
+                distance = math.sqrt(dx ** 2 + dy ** 2)
+                if distance > 0:
+                    new_x = prev_x + dx * personality['stroke_spacing']
+                    new_y = prev_y + dy * personality['stroke_spacing']
+
+            new_stroke.append((new_x, new_y, p1, p2))
+
+        # 确保笔画封闭
+        if new_stroke[0][:2] != new_stroke[-1][:2]:
+            new_stroke.append((new_stroke[0][0], new_stroke[0][1], 0, 1))
+
+        new_stroke = self.add_decoration(new_stroke, personality)
+
+        return new_stroke
 
     def request(self, x: dict, path: str) -> str:
         self.global_personality = self.generate_global_personality()
