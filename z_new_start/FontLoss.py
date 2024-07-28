@@ -31,8 +31,8 @@ class FontLoss2(Render):
     def __init__(self):
         super(FontLoss2, self).__init__()
 
-    def renderIt(self, *arg, **kwargs) -> str:
-        return str(self.degree)
+    def renderIt(self, *arg, **kwargs):
+        return str(self.degree), 's'
 
 
 if __name__ == '__main__':

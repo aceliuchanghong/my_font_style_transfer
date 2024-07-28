@@ -45,7 +45,7 @@ class Render(ABC):
         self.degree = math.cos(1 / 3 * math.pi)
 
     @abstractmethod
-    def renderIt(self, *arg, **kwargs: Any) -> str:
+    def renderIt(self, *arg, **kwargs: Any):
         pass
 
     def __call__(self, *args, **kwargs):
@@ -114,8 +114,8 @@ class RenderLoss(Render):
     def __init__(self):
         super(RenderLoss, self).__init__()
 
-    def renderIt(self, *arg, **kwargs) -> str:
-        return str(kwargs['dropout'])
+    def renderIt(self, *arg, **kwargs):
+        return str(kwargs['dropout']), 's'
 
     def get_mixture_coef2(self, output):
         z = output
@@ -188,15 +188,17 @@ class CoorsRender(Render):
                 cls._instance = super(CoorsRender, cls).__new__(cls, *args, **kwargs)
         return cls._instance
 
-    def renderIt(self, *arg, **kwargs: Any) -> str:
+    def renderIt(self, *arg, **kwargs: Any):
+        s = ""
         if self[0] > kwargs['keys'][new_start_config['train']['keys']]:
-            print("here")
+            # print(self[0], kwargs['keys'][new_start_config['train']['keys']])
+            s = "s"
             path = get_pkl(kwargs['keys']['p'], gd=kwargs['keys']['gd'])
         else:
-            print('there')
+            # print('there')
             bs, _n, _, h, w = kwargs['keys']['images'].shape
             path = self(kwargs['keys']['p'], gd=kwargs['keys']['gd'], C=_)[0]
-        return path
+        return path, s
 
 
 if __name__ == '__main__':

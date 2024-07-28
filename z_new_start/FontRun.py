@@ -10,7 +10,7 @@ class CoorsSubject:
 
     def generate_global_personality(self):
         return {
-            'stroke_spacing': random.uniform(0.7, 0.75),
+            'stroke_spacing': random.uniform(0.7, 0.78),
             'stroke_length': random.uniform(0.99, 0.998),
             'wave_amplitude': random.uniform(4.1, 4.2),
             'wave_frequency': random.uniform(0.4, 0.5),
@@ -18,7 +18,7 @@ class CoorsSubject:
             'decoration_size': random.uniform(12, 15),
             'tightness': random.uniform(1.02, 1.24),
             'merge_probability': random.uniform(0.3, 0.5),
-            'merge_distance': random.uniform(5, 10),
+            'merge_distance': random.uniform(5, 100),
         }
 
     def transform_point(self, x, y, personality):

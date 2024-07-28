@@ -54,8 +54,8 @@ def main(opt):
         seed = train_conf['seed']
     fix_seed(seed)
     logger.info(f"seed: {seed}")
-
-    generate_dataset = FontDataset(is_train=opt.dev, is_dev=opt.dev)
+    logger.info('loading pretrained model......')
+    generate_dataset = FontDataset(is_train=opt.dev, is_dev=opt.dev, train_percent=0.5)
     generate_loader = DataLoader(generate_dataset, 1, True,
                                  drop_last=False,
                                  collate_fn=generate_dataset.collect_function,
@@ -96,10 +96,10 @@ def main(opt):
             model.load_state_dict(model_state_dict)
         logger.info('loaded pretrained model from {}'.format(opt.pretrained_model))
     if isinstance(model, torch.nn.DataParallel):
-        coors_path = model.module.inference(images, generate_dataset, generate_loader)
+        coors_path, _ = model.module.inference(images, generate_dataset, generate_loader)
     else:
-        coors_path = model.inference(images, generate_dataset, generate_loader)
-    logger.info('result coordinates path:{}'.format(coors_path))
+        coors_path, _ = model.inference(images, generate_dataset, generate_loader)
+    logger.info(f'result coordinate{_} path:{coors_path}')
 
 
 if __name__ == '__main__':
