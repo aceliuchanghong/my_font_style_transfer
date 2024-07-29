@@ -51,6 +51,7 @@ def get_character_stroke_coordinates(font_path, characters, output_dir='.'):
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     pickle.dump(coordinates, open(output_dir + "/" + font_name + '.pkl', 'wb'))
+    print(output_dir + "/" + font_name + '.pkl')
 
     return coordinates
 
@@ -84,19 +85,20 @@ if __name__ == '__main__':
     """
     sudo apt-get install python3-fontforge
     /usr/bin/python3 -c "import fontforge;print(fontforge)"
-    ffpython D:\\aProject\\py\\SDT\\z_new_start\\generate_utils\\gen_coordinates_pkl.py
+    ffpython D:\\aProject\\py\\my_font_style_transfer\\z_new_start\\generate_utils\\gen_coordinates_pkl.py
     """
     # 字体
-    test_ttf = r'D:\aProject\py\SDT\z_new_start\generate_utils\LXGWWenKaiGB-Light.ttf'
+    test_ttf = r'D:\aProject\py\my_font_style_transfer\z_new_start\generate_utils\FangZhengHeiTiJianTi-1.ttf'
     # 获取要提取坐标的字符列表
-    characters = ["刘", "一"]
-
-    output_font_path = r'D:\aProject\py\SDT\z_new_start\generate_utils\GeneratedFont.ttf'
-
+    pkl_path = r'D:\aProject\py\my_font_style_transfer\z_new_start\generate_utils\new_character_dict.pkl'
+    characters = pickle.load(open(pkl_path, 'rb'))
+    # characters = ["刘", "一"]
     coordinates = get_character_stroke_coordinates(test_ttf, characters)
-    generate_font_from_coordinates(coordinates, output_font_path)
-    del coordinates['font_name']
-    print(coordinates)
+
+    # output_font_path = r'D:\aProject\py\SDT\z_new_start\generate_utils\GeneratedFont.ttf'
+    # generate_font_from_coordinates(coordinates, output_font_path)
+    # del coordinates['font_name']
+    # print(coordinates)
 
     for k, v in coordinates.items():
         for i, char in enumerate(v):

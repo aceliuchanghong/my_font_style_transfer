@@ -60,6 +60,19 @@ class Render(ABC):
             break
         x = get_files(gd.coordinate_path, gd.suffix)
         random.shuffle(x)
+        # for i in range(20):
+        #     N = i
+        #     try:
+        #         coors = x[N]
+        #     except Exception as e:
+        #         # print(e)
+        #         coors = x[0]
+        #     coordinate = pickle.load(open(coors, 'rb'))
+        #     del coordinate['font_name']
+        #     out_path = 'Saved/samples'
+        #     output = os.path.join(out_path, f'new{i}.pkl')
+        #     render = RenderProxy(coordinate)
+        #     ans = client_code(render, output)
         try:
             coors = x[N]
         except Exception as e:

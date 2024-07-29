@@ -9,7 +9,8 @@ import torch
 
 from z_new_start.generate_utils.read_coordinates_pkl import draw_character_strokes
 
-fix_seed(860)
+fix_seed(840)
+#fix_seed(857)
 tensor0 = torch.randn(1, 20, 200, 4)
 tensor1 = torch.randn(1, 20, 200, 4)
 pred = []
@@ -17,9 +18,9 @@ pred.append(tensor0)
 pred.append(tensor1)
 images = torch.randn(1, 12, 1, 64, 64)
 gd = FontDataset(is_train=False, is_dev=False)
-outputs, _ = _get_coors_decode(CoorsRender(), p=pred, images=images, dropout=new_start_config['train']['dropout'], gd=gd)
-print(outputs)
-print(_)
+outputs, _ = _get_coors_decode(CoorsRender(), p=pred, images=images, dropout=new_start_config['train']['dropout'],
+                               gd=gd)
+print(outputs, _)
 
 
 def main(opt):

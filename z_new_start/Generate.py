@@ -53,7 +53,7 @@ def main(opt):
     except Exception as e:
         seed = train_conf['seed']
     fix_seed(seed)
-    logger.info(f"seed: {seed}")
+    logger.info(f"seed: {train_conf['seed']}")
     logger.info('loading pretrained model......')
     generate_dataset = FontDataset(is_train=opt.dev, is_dev=opt.dev, train_percent=0.5)
     generate_loader = DataLoader(generate_dataset, 1, True,

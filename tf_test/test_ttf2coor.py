@@ -12,7 +12,11 @@ logger = logging.getLogger(__name__)
 def get_character_stroke_coordinates2(font_path, characters, output_dir='.'):
     coordinates = {}
     # 打开字体文件
-    font = fontforge.open(font_path)
+    try:
+        font = fontforge.open(font_path)
+    except Exception as e:
+        logger.error(f"Failed to open font file: {e}")
+        return
     # 遍历每个字符并生成坐标点
     for char in characters:
         try:
@@ -73,14 +77,15 @@ if __name__ == '__main__':
     """
     pkl_path = r'D:\aProject\py\my_font_style_transfer\z_new_start\generate_utils\new_character_dict.pkl'
     char_dict = pickle.load(open(pkl_path, 'rb'))
-    print(char_dict)
+    # print(char_dict)
 
-    output_dir = './LCH_pics'
+    output_dir = './ll'
 
     # ttf_dir = r'D:\download\Chinese-Fonts-Dataset-main\ttf格式\衬线体\仿宋'
     # ttf_list = get_ttf_files(ttf_dir)
     ttf_list = [
-        r'D:\aProject\py\my_font_style_transfer\z_new_start\generate_utils\LXGWWenKaiGB-Light.ttf'
+        r'D:\aProject\py\my_font_style_transfer\z_new_start\generate_utils\FZHTJW-xx.ttf',
+        # r'D:\download\popular-fonts-master\popular-fonts-master\微软雅黑.ttf',
     ]
 
     with concurrent.futures.ThreadPoolExecutor() as executor:
