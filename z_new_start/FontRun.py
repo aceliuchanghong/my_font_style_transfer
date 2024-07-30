@@ -1,88 +1,71 @@
-import random
 import math
+import random
 import pickle
 
 class CoorsSubject:
     def __init__(self):
         self.output = {}
-        self.global_personality = None
+        self.personality = {}
 
-    def generate_global_personality(self):
-        return {
-            'stroke_spacing': random.uniform(0.85, 0.9),
-            'wave_amplitude': random.uniform(14.1, 15.2),
-            'wave_frequency': random.uniform(0.25, 0.4),
-            'horizontal_shift': random.uniform(48, 50),
-            'vertical_shift': random.uniform(48, 50),
-            'shift_probability': random.uniform(0.69, 0.7),
+    def generate_personality(self, angle_range=(-math.pi / 90, math.pi / 90)):
+        self.personality = {
+            'angle': random.uniform(*angle_range),
+            'wave_amplitude': random.uniform(4, 5),
+            'wave_frequency': random.uniform(0.35, 0.4),
         }
 
-    def transform_point(self, x, y, personality):
-        new_x = x + personality['wave_amplitude'] * math.sin(y * personality['wave_frequency'])
-        new_y = y + personality['wave_amplitude'] * math.sin(x * personality['wave_frequency'])
-        return new_x, new_y
+    def apply_personality(self, x, y):
+        # Apply rotation based on the angle in personality
+        nx = x * math.cos(self.personality['angle']) - y * math.sin(self.personality['angle'])
+        ny = x * math.sin(self.personality['angle']) + y * math.cos(self.personality['angle'])
+        return nx, ny
 
-    def smooth_stroke(self, stroke, personality):
-        new_stroke = []
-        for i, point in enumerate(stroke):
-            x, y, p1, p2 = point
-            new_x, new_y = self.transform_point(x, y, personality)
-            if i > 0:
-                prev_x, prev_y = new_stroke[-1][:2]
-                dx = new_x - prev_x
-                dy = new_y - prev_y
-                distance = math.sqrt(dx ** 2 + dy ** 2)
-                if distance > 0:
-                    new_x = prev_x + dx * personality['stroke_spacing']
-                    new_y = prev_y + dy * personality['stroke_spacing']
-            new_stroke.append((new_x, new_y, p1, p2))
-        return new_stroke
+    def disturb_coordinate(self, x1, y1, x2, y2):
+        dx = x2 - x1
+        dy = y2 - y1
+        length = math.sqrt(dx ** 2 + dy ** 2)
+        if length == 0:
+            return x1, y1
+        dx /= length
+        dy /= length
 
-    def round_corners(self, stroke):
-        rounded_stroke = []
-        for i, point in enumerate(stroke):
-            x, y, p1, p2 = point
-            if i == 0 or i == len(stroke) - 1:
-                rounded_stroke.append(point)
+        tangent_x, tangent_y = dx, dy
+        normal_x, normal_y = -dy, dx
+
+        disturb_x = random.gauss(0, 0.08) * normal_x
+        disturb_y = random.gauss(0, 0.08) * normal_y
+
+        return self.apply_personality(x1 + disturb_x, y1 + disturb_y)
+
+    def transform_point_with_wave(self, x, y):
+        # Apply wave transformation
+        wave_x = x + self.personality['wave_amplitude'] * math.sin(y * self.personality['wave_frequency'])
+        wave_y = y + self.personality['wave_amplitude'] * math.sin(x * self.personality['wave_frequency'])
+        return wave_x, wave_y
+
+    def disturb_stroke(self, stroke):
+        disturbed_stroke = []
+        for i in range(len(stroke)):
+            x1, y1, p1, p2 = stroke[i]
+            if i == len(stroke) - 1:
+                x2, y2 = stroke[0][0], stroke[0][1]
             else:
-                prev_point = stroke[i - 1]
-                next_point = stroke[i + 1]
-                new_x = (prev_point[0] + x + next_point[0]) / 3
-                new_y = (prev_point[1] + y + next_point[1]) / 3
-                rounded_stroke.append((new_x, new_y, p1, p2))
-        return rounded_stroke
+                x2, y2 = stroke[i + 1][0], stroke[i + 1][1]
 
-    def identify_stroke_type(self, stroke):
-        x_coords = [point[0] for point in stroke]
-        y_coords = [point[1] for point in stroke]
-        x_range = max(x_coords) - min(x_coords)
-        y_range = max(y_coords) - min(y_coords)
-        return 'horizontal' if x_range > y_range else 'vertical'
+            # Apply disturbance to coordinate
+            x1, y1 = self.disturb_coordinate(x1, y1, x2, y2)
 
-    def shift_stroke(self, stroke, personality):
-        if random.random() < personality['shift_probability']:
-            stroke_type = self.identify_stroke_type(stroke)
-            shift = personality['horizontal_shift'] if stroke_type == 'horizontal' else personality['vertical_shift']
-            shifted_stroke = []
-            for point in stroke:
-                x, y, p1, p2 = point
-                if stroke_type == 'horizontal':
-                    shifted_stroke.append((x, y + shift, p1, p2))
-                else:
-                    shifted_stroke.append((x + shift, y, p1, p2))
-            return shifted_stroke
-        return stroke
+            # Apply wave transformation
+            x1, y1 = self.transform_point_with_wave(x1, y1)
 
-    def process_character(self, strokes, personality):
-        smoothed_strokes = [self.smooth_stroke(stroke, personality) for stroke in strokes]
-        rounded_strokes = [self.round_corners(stroke) for stroke in smoothed_strokes]
-        shifted_strokes = [self.shift_stroke(stroke, personality) for stroke in rounded_strokes]
-        return shifted_strokes
+            disturbed_stroke.append((x1, y1, p1, p2))
+        return disturbed_stroke
 
     def request(self, x: dict, path: str) -> str:
-        self.global_personality = self.generate_global_personality()
-        for char, strokes in x.items():
-            self.output[char] = self.process_character(strokes, self.global_personality)
+        self.generate_personality()
+
+        self.output = {char: [self.disturb_stroke(stroke) for stroke in strokes] for char, strokes in x.items()}
+
         with open(path, 'wb') as f:
             pickle.dump(self.output, f)
         return path
