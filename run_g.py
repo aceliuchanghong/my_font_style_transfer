@@ -9,8 +9,8 @@ import torch
 
 from z_new_start.generate_utils.read_coordinates_pkl import draw_character_strokes
 
-fix_seed(840)
-# fix_seed(857)
+#fix_seed(840)
+fix_seed(857)
 tensor0 = torch.randn(1, 20, 200, 4)
 tensor1 = torch.randn(1, 20, 200, 4)
 pred = []

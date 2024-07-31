@@ -4,7 +4,7 @@ new_start_config = {
         'z_pic_pkl_path': r'D:\aProject\py\my_font_style_transfer\z_new_start\ABtest\files\AB_pics_pkl',
         'content_pkl_path': r'D:\aProject\py\my_font_style_transfer\z_new_start\ABtest\files\new_chinese_content.pkl',
         'character_pkl_path': r'D:\aProject\py\my_font_style_transfer\z_new_start\ABtest\files\new_character_dict.pkl',
-        'coors_pkl_path': r'D:\soft\FontForgeBuilds\ll\FZHTJW-xx.pkl',
+        'coors_pkl_path': r'D:\soft\FontForgeBuilds\ll\FZHTJW-xx2.pkl',
         'save_model_dir': r'D:\aProject\py\my_font_style_transfer\z_new_start\save_model',
         'PER_BATCH': 2,
         'NUM_THREADS': 0,

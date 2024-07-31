@@ -84,7 +84,7 @@ if __name__ == '__main__':
     # ttf_dir = r'D:\download\Chinese-Fonts-Dataset-main\ttf格式\衬线体\仿宋'
     # ttf_list = get_ttf_files(ttf_dir)
     ttf_list = [
-        r'D:\aProject\py\my_font_style_transfer\z_new_start\generate_utils\FZHTJW-xx.ttf',
+        r'D:\aProject\py\my_font_style_transfer\z_new_start\generate_utils\FZHT21.ttf',
         # r'D:\download\popular-fonts-master\popular-fonts-master\微软雅黑.ttf',
     ]
 

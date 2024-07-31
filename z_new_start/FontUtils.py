@@ -188,6 +188,7 @@ class CoorsRender(Render):
 
     def __init__(self):
         super(CoorsRender, self).__init__()
+        self.s = ""
 
     def __new__(cls, *args, **kwargs):
         """
@@ -202,16 +203,13 @@ class CoorsRender(Render):
         return cls._instance
 
     def renderIt(self, *arg, **kwargs: Any):
-        s = ""
         if self[0] > kwargs['keys'][new_start_config['train']['keys']]:
-            # print(self[0], kwargs['keys'][new_start_config['train']['keys']])
-            s = "s"
+            self.s = "s"
             path = get_pkl(kwargs['keys']['p'], gd=kwargs['keys']['gd'])
         else:
-            # print('there')
             bs, _n, _, h, w = kwargs['keys']['images'].shape
             path = self(kwargs['keys']['p'], gd=kwargs['keys']['gd'], C=_)[0]
-        return path, s
+        return path, self.s
 
 
 if __name__ == '__main__':

@@ -98,6 +98,7 @@ if __name__ == '__main__':
     python cut_pics.py --input 'from/from1.jpg' --rect_size 8 --ignore_min_size 50 --ignore_max_size 70 --offset_param 2
     python cut_pics.py --input 'from/from4.jpg' --rect_size 8 --ignore_min_size 80 --ignore_max_size 150 --offset_param 2
     python cut_pics.py --input 'from/from5.jpg' --rect_size 35 --ignore_min_size 150 --ignore_max_size 450 --offset_param 20
+    python cut_pics.py --input 'from/img_2.png' --rect_size 3 --ignore_min_size 35 --ignore_max_size 60 --offset_param 0
     """
     parser = argparse.ArgumentParser()
     parser.add_argument('--input', dest='input_path', default='from/from4.jpg',
