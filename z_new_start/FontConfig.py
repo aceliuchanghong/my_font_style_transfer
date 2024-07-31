@@ -30,7 +30,7 @@ new_start_config = {
         'num_epochs': 20,
         'LEARNING_RATE': 1e-4,
         'MAX_STEPS': 13000,
-        'SNAPSHOT_BEGIN': 3000,
+        'SNAPSHOT_BEGIN': 1000,
         'SNAPSHOT_EPOCH': 499,
         'd_model': 512,
         'num_head': 8,

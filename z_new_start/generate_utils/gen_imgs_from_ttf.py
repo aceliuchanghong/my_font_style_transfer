@@ -12,8 +12,8 @@ test_ttf = r'D:\aProject\py\my_font_style_transfer\z_new_start\generate_utils\LX
 char_json_path = r'D:\aProject\py\my_font_style_transfer\tf_test\txt9169.json'
 new_char_dic = r'D:\aProject\py\my_font_style_transfer\z_new_start\generate_utils\new_character_dict.pkl'
 char_dict = pickle.load(open(new_char_dic, 'rb'))
-char_dict = ['A', 'B', '刘', '一', '以', '已', '亦', '伊', '比', '的', '地', '分', '非', '火', '炬', '电', '子', '福',
-             '建', '：', '（', '9']
+# char_dict = ['A', 'B', '刘', '一', '以', '已', '亦', '伊', '比', '的', '地', '分', '非', '火', '炬', '电', '子', '福',
+#              '建', '：', '（', '9']
 
 
 def draw_glyph(font_path, char_dict):
